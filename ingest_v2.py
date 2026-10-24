@@ -19,11 +19,26 @@ PAGE_CHUNK_OVERLAP = 180
 EMBED_BATCH_SIZE = 32
 
 TABLE_CAPTION = re.compile(r"\bTable\s+\d+\s*[–-]\s*\d+\s*:", re.IGNORECASE)
+TABLE_CAPTION_NAME = re.compile(
+    r"\bTable\s+\d+\s*[–-]\s*\d+\s*:\s*(?:The\s+)?(?P<name>[^.\n]+)",
+    re.IGNORECASE,
+)
+CLASS_TABLE_SUFFIX = re.compile(
+    r"\s+(?:spells?\s+per\s+day|spells?\s+known|class\s+features)\s*$",
+    re.IGNORECASE,
+)
 TABLE_DATA_ROW = re.compile(
     r"^\s*(?:\d+(?:st|nd|rd|th)?|\+\d+(?:/\+\d+)?)\s+\S",
     re.IGNORECASE,
 )
-SPELL_LEVEL_TOKEN = re.compile(r"^(?:0|[1-9](?:st|nd|rd|th))$", re.IGNORECASE)
+CLASS_LEVEL_VALUE = re.compile(
+    r"\bClass level (?P<level>\d{1,2})(?:st|nd|rd|th)\b",
+    re.IGNORECASE,
+)
+CASTING_ABILITY = re.compile(r"\b(Intelligence|Wisdom|Charisma)\b", re.IGNORECASE)
+SPELL_LEVEL_TOKEN = re.compile(
+    r"^(?:0(?:th)?|[1-9](?:st|nd|rd|th)?)$", re.IGNORECASE
+)
 SPELL_SLOT_VALUE = re.compile(r"^(?:\d+|—|–|-)$")
 BONUS_SCORE_ROW = re.compile(
     r"^\s*(?P<low>\d{1,2})\s*[–—-]\s*(?P<high>\d{1,2})"
@@ -117,31 +132,40 @@ def extract_table_blocks(text: str) -> list[str]:
     return table_blocks
 
 
+def ordinal_number(value: int) -> str:
+    suffix = (
+        "th"
+        if 10 <= value % 100 <= 13
+        else {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    )
+    return f"{value}{suffix}"
+
+
 def normalize_spell_table_rows(table_text: str) -> list[str]:
-    if "spells per day" not in table_text.lower():
+    if "spell" not in table_text.lower():
         return []
 
     lines = table_text.splitlines()
-    header = next(
-        (
+    spell_levels = []
+    for end in range(len(lines)):
+        start = max(0, end - 2)
+        header_lines = [
             line
-            for line in lines
-            if "level" in line.lower()
-            and len(
-                [token for token in line.split() if SPELL_LEVEL_TOKEN.fullmatch(token)]
-            )
-            >= 2
-        ),
-        None,
-    )
-    if header is None:
+            for line in lines[start : end + 1]
+            if not TABLE_CAPTION.search(line)
+        ]
+        header_block = " ".join(header_lines)
+        tokens = [
+            token
+            for token in header_block.split()
+            if SPELL_LEVEL_TOKEN.fullmatch(token)
+        ]
+        if "level" in header_block.lower() and len(tokens) >= 2:
+            spell_levels = tokens
+            break
+    if not spell_levels:
         return []
 
-    spell_levels = [
-        token
-        for token in header.split()
-        if SPELL_LEVEL_TOKEN.fullmatch(token)
-    ]
     normalized = []
     for line in lines:
         if not TABLE_DATA_ROW.match(line):
@@ -156,8 +180,14 @@ def normalize_spell_table_rows(table_text: str) -> list[str]:
 
         entries = []
         for spell_level, value in zip(spell_levels, values, strict=True):
-            count = "0" if value in {"—", "–", "-"} else value
-            label = "0th" if spell_level == "0" else spell_level
+            count = "unavailable" if value in {"—", "–", "-"} else value
+            label = (
+                "0th"
+                if spell_level.lower() in {"0", "0th"}
+                else spell_level
+                if spell_level[-1].isalpha()
+                else ordinal_number(int(spell_level))
+            )
             entries.append(f"{label}-level: {count}")
         normalized.append(
             f"Class level {class_level}; spells per day: " + "; ".join(entries) + "."
@@ -201,6 +231,32 @@ def normalize_bonus_spell_rows(page_text: str) -> list[str]:
     return normalized
 
 
+def table_class_name(table_text: str) -> str | None:
+    match = TABLE_CAPTION_NAME.search(table_text.splitlines()[0])
+    if match is None:
+        return None
+    name = CLASS_TABLE_SUFFIX.sub("", match.group("name").strip())
+    return name or None
+
+
+def infer_class_spellcasting_ability(
+    class_name: str, page_texts: list[str]
+) -> str | None:
+    class_pattern = re.compile(rf"\b{re.escape(class_name)}s?\b", re.IGNORECASE)
+    candidates = set()
+    for page_text in page_texts:
+        compact = re.sub(r"\s+", " ", page_text)
+        for sentence in re.split(r"(?<=[.!?])\s+", compact):
+            if not class_pattern.search(sentence) or "spell" not in sentence.casefold():
+                continue
+            if not re.search(r"\bdetermines?\b", sentence, re.IGNORECASE):
+                continue
+            ability = CASTING_ABILITY.search(sentence)
+            if ability:
+                candidates.add(ability.group(1).lower())
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
 def embed(texts: list[str]) -> list[list[float]]:
     response = requests.post(
         f"{OLLAMA_URL}/api/embed",
@@ -224,11 +280,11 @@ def point_id(source: str, page: int, kind: str, ordinal: int, text: str) -> str:
 def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[str, Any]]:
     records = []
     with pdfplumber.open(pdf_path) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
+        page_texts = [page.extract_text(layout=True) or "" for page in pdf.pages]
+        for page_number, page_text in enumerate(page_texts, start=1):
             if preview_page is not None and page_number != preview_page:
                 continue
 
-            page_text = page.extract_text(layout=True) or ""
             for chunk_number, chunk in enumerate(split_page_text(page_text)):
                 records.append(
                     {
@@ -252,17 +308,29 @@ def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[st
                         "text": table_text,
                     }
                 )
-                caption = table_text.splitlines()[0].strip()
-                for row_number, normalized_row in enumerate(
-                    normalize_spell_table_rows(table_text)
-                ):
+                class_name = table_class_name(table_text)
+                class_ability = (
+                    infer_class_spellcasting_ability(class_name, page_texts)
+                    if class_name
+                    else None
+                )
+                for row_number, normalized_row in enumerate(normalize_spell_table_rows(table_text)):
+                    level_match = CLASS_LEVEL_VALUE.search(normalized_row)
+                    if level_match is None:
+                        continue
                     records.append(
                         {
                             "source": pdf_path.name,
                             "page": page_number,
                             "kind": "table_row",
                             "ordinal": table_number * 10000 + row_number,
-                            "text": f"{caption}. Class spells per day. {normalized_row}",
+                            "class_name": class_name,
+                            "class_level": int(level_match.group("level")),
+                            "class_ability": class_ability,
+                            "text": (
+                                f"{table_text.splitlines()[0].strip()}. "
+                                f"Class spells per day. {normalized_row}"
+                            ),
                         }
                     )
             for row_number, normalized_row in enumerate(
@@ -335,6 +403,11 @@ def ingest(records: list[dict[str, Any]], client: QdrantClient) -> int:
                     "page": record["page"],
                     "kind": record["kind"],
                     "text": record["text"],
+                    **{
+                        key: record[key]
+                        for key in ("class_name", "class_level", "class_ability")
+                        if key in record and record[key] is not None
+                    },
                 },
             )
             for record, vector in zip(batch, vectors, strict=True)

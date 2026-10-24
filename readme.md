@@ -244,6 +244,43 @@ bonus spells when it can identify the class's casting ability and the matching
 ability score. If extracted class metadata does not establish the ability, it
 should not guess or add a bonus.
 
+### Automated tests
+
+Install the development test dependencies in the virtual environment:
+
+```bash
+cd "$HOME/dnd-rag"
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+```
+
+Run the offline tests:
+
+```bash
+python -m pytest -m "not live"
+```
+
+These tests submit sample questions through the FastAPI chat endpoint while
+providing deterministic retrieved passages. They check answer calculations
+and class/ability handling without contacting Ollama or Qdrant.
+
+To exercise the running service, ingest the PDFs, start the API, then set the
+API's `/v1` base URL and API key in the test shell:
+
+```bash
+export RAG_TEST_BASE_URL="http://127.0.0.1:8000/v1"
+read -rsp "RAG API key: " RAG_TEST_API_KEY
+export RAG_TEST_API_KEY
+printf '\n'
+python -m pytest -m live
+unset RAG_TEST_API_KEY
+```
+
+Live tests send the sample spell questions to the configured API and check
+that the responses contain expected spell counts. They validate retrieval,
+indexing, and the response path together; they require a running, authenticated
+service and successfully ingested rulebooks.
+
 ## Updating code or PDFs
 
 After changing the importer, copy the updated `ingest_v2.py` to Ubuntu and

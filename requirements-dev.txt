@@ -1,0 +1,3 @@
+-r requirements-rag-service.txt
+pytest>=8.0
+httpx2

@@ -44,6 +44,20 @@ CLASS_TABLE_NAME_PATTERN = re.compile(
     r"\bTable\s+\d+\s*[–-]\s*\d+\s*:\s*(?:The\s+)?(?P<name>[^.\n]+)",
     re.IGNORECASE,
 )
+BASE_ATTACK_BONUS_QUESTION = re.compile(r"\b(?:BAB|base attack bonus)\b", re.IGNORECASE)
+BASE_ATTACK_BONUS_VALUE_PATTERN = re.compile(
+    r"\bbase attack bonus:\s*\+(?P<value>\d+)\b",
+    re.IGNORECASE,
+)
+BASE_SAVE_QUESTION = re.compile(
+    r"\b(?:base\s+)?(?:saving throws?|saves?)\b",
+    re.IGNORECASE,
+)
+BASE_SAVE_VALUE_PATTERN = re.compile(
+    r"\bbase saves:\s*Fortitude\s+\+(?P<fortitude>\d+),\s*"
+    r"Reflex\s+\+(?P<reflex>\d+),\s*Will\s+\+(?P<will>\d+)",
+    re.IGNORECASE,
+)
 
 app = FastAPI(title="D&D Rules RAG API")
 qdrant = QdrantClient(url=QDRANT_URL)
@@ -145,6 +159,29 @@ def requested_class_level(question: str, class_names: set[str]) -> tuple[str, in
     return None
 
 
+def requested_class_levels(question: str, class_names: set[str]) -> list[tuple[str, int]]:
+    requested = []
+    for class_name in sorted(class_names, key=len, reverse=True):
+        escaped_name = re.escape(class_name)
+        patterns = (
+            re.compile(
+                rf"\b{escaped_name}\s+(?P<level>\d{{1,2}})(?:st|nd|rd|th)?\b",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                rf"\b(?P<level>\d{{1,2}})(?:st|nd|rd|th)?[\s-]+"
+                rf"(?:level\s+)?{escaped_name}\b",
+                re.IGNORECASE,
+            ),
+        )
+        for pattern in patterns:
+            match = pattern.search(question)
+            if match:
+                requested.append((class_name, int(match.group("level"))))
+                break
+    return requested
+
+
 def consistent_class_ability(passages: list[dict[str, Any]]) -> str | None:
     abilities = {
         passage["class_ability"].casefold()
@@ -153,6 +190,52 @@ def consistent_class_ability(passages: list[dict[str, Any]]) -> str | None:
         and passage["class_ability"].casefold() in {"intelligence", "wisdom", "charisma"}
     }
     return next(iter(abilities)) if len(abilities) == 1 else None
+
+
+def retrieve_class_progression_rows(question: str) -> list[Any]:
+    scroll_filter = qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="kind",
+                match=qdrant_models.MatchValue(value="class_progression_row"),
+            )
+        ]
+    )
+    points, next_offset = qdrant.scroll(
+        collection_name=COLLECTION,
+        scroll_filter=scroll_filter,
+        limit=256,
+        with_payload=True,
+    )
+    progression_rows = []
+    while True:
+        progression_rows.extend(points)
+        if next_offset is None:
+            break
+        points, next_offset = qdrant.scroll(
+            collection_name=COLLECTION,
+            scroll_filter=scroll_filter,
+            limit=256,
+            offset=next_offset,
+            with_payload=True,
+        )
+
+    class_names = {
+        name for point in progression_rows if (name := class_name_from_point(point))
+    }
+    requested = requested_class_levels(question, class_names)
+    matches = []
+    for class_name, class_level in requested:
+        for point in progression_rows:
+            point_name = class_name_from_point(point)
+            if (
+                point_name is not None
+                and point_name.casefold() == class_name.casefold()
+                and (point.payload or {}).get("class_level") == class_level
+            ):
+                matches.append(point)
+                break
+    return matches
 
 
 def retrieve_class_spell_row(question: str) -> list[Any]:
@@ -274,6 +357,8 @@ def retrieve(question: str) -> list[dict[str, Any]]:
 
         ability_match = ABILITY_SCORE_PATTERN.search(question)
         has_spell_question = "spell" in question.lower()
+        has_bab_question = BASE_ATTACK_BONUS_QUESTION.search(question) is not None
+        has_base_save_question = BASE_SAVE_QUESTION.search(question) is not None
         class_points = retrieve_class_spell_row(question) if has_spell_question else []
         class_ability = consistent_class_ability(
             [
@@ -288,6 +373,13 @@ def retrieve(question: str) -> list[dict[str, Any]]:
             points = class_points + [
                 point for point in points if point.id not in class_point_ids
             ]
+
+        if has_bab_question or has_base_save_question:
+            progression_points = retrieve_class_progression_rows(question)
+            seen_ids = {point.id for point in points}
+            points.extend(
+                point for point in progression_points if point.id not in seen_ids
+            )
 
         if (
             ability_match
@@ -331,6 +423,10 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                     else None
                 ),
                 "class_ability": payload.get("class_ability"),
+                "base_attack_bonus": payload.get("base_attack_bonus"),
+                "fortitude_save": payload.get("fortitude_save"),
+                "reflex_save": payload.get("reflex_save"),
+                "will_save": payload.get("will_save"),
             }
         )
     return passages
@@ -367,6 +463,125 @@ def spell_slot_count(text: str, spell_level: int) -> int | None:
 
 def citation(passage: dict[str, Any]) -> str:
     return f"[{passage['source']}, PDF p. {passage['page']}]"
+
+
+def structured_base_attack_bonus_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if BASE_ATTACK_BONUS_QUESTION.search(question) is None:
+        return None
+
+    class_names = {
+        passage["class_name"]
+        for passage in passages
+        if passage.get("kind") == "class_progression_row"
+        and isinstance(passage.get("class_name"), str)
+    }
+    requested = requested_class_levels(question, class_names)
+    if not requested:
+        return None
+
+    contributions = []
+    for class_name, class_level in requested:
+        row = next(
+            (
+                passage
+                for passage in passages
+                if passage.get("kind") == "class_progression_row"
+                and isinstance(passage.get("class_name"), str)
+                and passage["class_name"].casefold() == class_name.casefold()
+                and passage.get("class_level") == class_level
+            ),
+            None,
+        )
+        if row is None:
+            return None
+        bab = row.get("base_attack_bonus")
+        if not isinstance(bab, int):
+            text = row.get("text")
+            match = (
+                BASE_ATTACK_BONUS_VALUE_PATTERN.search(text)
+                if isinstance(text, str)
+                else None
+            )
+            if match is None:
+                return None
+            bab = int(match.group("value"))
+        contributions.append((class_name, class_level, bab, row))
+
+    total = sum(bab for _, _, bab, _ in contributions)
+    breakdown = "; ".join(
+        f"{class_name} {class_level}: +{bab}"
+        for class_name, class_level, bab, _ in contributions
+    )
+    citations = " ".join(
+        dict.fromkeys(citation(row) for _, _, _, row in contributions)
+    )
+    return f"The total base attack bonus is +{total} ({breakdown}) {citations}."
+
+
+def structured_base_saves_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if BASE_SAVE_QUESTION.search(question) is None:
+        return None
+
+    class_names = {
+        passage["class_name"]
+        for passage in passages
+        if passage.get("kind") == "class_progression_row"
+        and isinstance(passage.get("class_name"), str)
+    }
+    requested = requested_class_levels(question, class_names)
+    if not requested:
+        return None
+
+    save_names = ("fortitude", "reflex", "will")
+    totals = dict.fromkeys(save_names, 0)
+    citations = []
+    breakdowns = {save_name: [] for save_name in save_names}
+    for class_name, class_level in requested:
+        row = next(
+            (
+                passage
+                for passage in passages
+                if passage.get("kind") == "class_progression_row"
+                and isinstance(passage.get("class_name"), str)
+                and passage["class_name"].casefold() == class_name.casefold()
+                and passage.get("class_level") == class_level
+            ),
+            None,
+        )
+        if row is None:
+            return None
+
+        values = {
+            "fortitude": row.get("fortitude_save"),
+            "reflex": row.get("reflex_save"),
+            "will": row.get("will_save"),
+        }
+        if not all(isinstance(value, int) for value in values.values()):
+            text = row.get("text")
+            match = BASE_SAVE_VALUE_PATTERN.search(text) if isinstance(text, str) else None
+            if match is None:
+                return None
+            values = {
+                save_name: int(match.group(save_name))
+                for save_name in save_names
+            }
+
+        for save_name, value in values.items():
+            totals[save_name] += value
+            breakdowns[save_name].append(f"+{value} ({class_name} {class_level})")
+        citations.append(citation(row))
+
+    citation_text = " ".join(dict.fromkeys(citations))
+    results = "; ".join(
+        f"{save_name.capitalize()} +{totals[save_name]} "
+        f"({' + '.join(breakdowns[save_name])})"
+        for save_name in save_names
+    )
+    return f"The total base saving throws are {results}. {citation_text}."
 
 
 def structured_spell_slot_answer(
@@ -561,7 +776,11 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Request must include a non-empty user message")
 
     passages = retrieve(question)
-    structured_answer = structured_spell_slot_answer(question, passages)
+    structured_answer = structured_base_saves_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_base_attack_bonus_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_spell_slot_answer(question, passages)
     if structured_answer is not None:
         answer = structured_answer
         prompt_tokens = completion_tokens = 0
@@ -588,7 +807,11 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             "effect just because its bonus table was not retrieved. When a normalized "
             "class-level row is provided, treat its explicitly labeled spell-level "
             "count as authoritative; do not infer a different number from flattened "
-            "table text or neighboring rows."
+            "table text or neighboring rows. For a multiclass base attack bonus "
+            "question, add the BAB contributions for every class level; never use "
+            "only the highest-level class. For multiclass base saving throws, add "
+            "the Fortitude, Reflex, and Will base-save contributions from every "
+            "class level independently."
         )
         ability_match = ABILITY_SCORE_PATTERN.search(question)
         class_rows = [

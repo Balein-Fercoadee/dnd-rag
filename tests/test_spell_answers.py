@@ -86,6 +86,25 @@ BONUS_20 = bonus_row(
 )
 
 
+def progression_row(
+    caster_class: str, level: int, bab: int, page: int
+) -> dict[str, object]:
+    return {
+        "kind": "class_progression_row",
+        "class_name": caster_class,
+        "class_level": level,
+        "base_attack_bonus": bab,
+        "fortitude_save": {"Barbarian": 3, "Fighter": 4}.get(caster_class, 0),
+        "reflex_save": {"Barbarian": 1, "Fighter": 1}.get(caster_class, 0),
+        "will_save": {"Barbarian": 1, "Fighter": 1}.get(caster_class, 0),
+        "source": SOURCE,
+        "page": page,
+        "text": (
+            f"{caster_class} class level {level}; base attack bonus: +{bab}."
+        ),
+    }
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     rag_app.app.dependency_overrides[rag_app.require_api_key] = lambda: None
@@ -195,6 +214,55 @@ def test_unlisted_multiword_caster_name_is_resolved_from_indexed_table(
     assert "Charisma score, which was not provided" in answer
 
 
+def test_multiclass_bab_adds_each_class_progression(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer = ask(
+        client,
+        "What is the BAB of a barbarian 3/fighter 4 character?",
+        [
+            progression_row("Barbarian", 3, 3, 26),
+            progression_row("Fighter", 4, 4, 40),
+        ],
+        monkeypatch,
+    )
+
+    assert "total base attack bonus is +7" in answer
+    assert "Barbarian 3: +3; Fighter 4: +4" in answer
+
+
+def test_multiclass_bab_query_finds_all_class_level_pairs() -> None:
+    question = "What is the BAB of a barbarian 3/fighter 4 character?"
+
+    assert rag_app.requested_class_levels(
+        question,
+        {"Barbarian", "Fighter", "Wizard"},
+    ) == [("Barbarian", 3), ("Fighter", 4)]
+
+
+def test_multiclass_saving_throws_add_each_class_contribution(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    barbarian = progression_row("Barbarian", 3, 3, 26)
+    barbarian.update(
+        {"fortitude_save": 3, "reflex_save": 1, "will_save": 1}
+    )
+    fighter = progression_row("Fighter", 4, 4, 40)
+    fighter.update(
+        {"fortitude_save": 4, "reflex_save": 1, "will_save": 1}
+    )
+    answer = ask(
+        client,
+        "What are the base saving throws for a 3rd level barbarian/4th level fighter character?",
+        [barbarian, fighter],
+        monkeypatch,
+    )
+
+    assert "Fortitude +7" in answer
+    assert "Reflex +2" in answer
+    assert "Will +2" in answer
+
+
 @pytest.mark.live
 @pytest.mark.parametrize(
     ("question", "expected"),
@@ -214,6 +282,14 @@ def test_unlisted_multiword_caster_name_is_resolved_from_indexed_table(
         (
             "How many spells does an 11th level ranger with an 18 wisdom get?",
             ("1st-level: 1 base + 1 bonus = 2", "3rd-level: 0 base + 1 bonus = 1"),
+        ),
+        (
+            "What is the BAB of a barbarian 3/fighter 4 character?",
+            ("total base attack bonus is +7", "Barbarian 3: +3; Fighter 4: +4"),
+        ),
+        (
+            "What are the base saving throws for a 3rd level barbarian/4th level fighter character?",
+            ("Fortitude +7", "Reflex +2", "Will +2"),
         ),
     ],
 )

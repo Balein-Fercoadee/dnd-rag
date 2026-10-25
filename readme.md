@@ -146,17 +146,30 @@ Or ingest just one PDF:
 python ingest_v2.py --pdf "pdfs/Player's Handbook.pdf"
 ```
 
-The importer extracts layout-preserving page text, captioned tables,
-normalized class spell-per-day rows, and ability-score bonus-spell rows. It
-embeds these records with Ollama and upserts them into the configured Qdrant
-collection. Before reindexing a PDF, it removes previously indexed points with
-that PDF's filename; therefore keep filenames unique across books. Reingesting
-the PDFs after importer changes refreshes their stored metadata and vectors.
+The importer extracts layout-preserving page text, captioned tables, generic
+table rows with caption/header context, normalized class spell-per-day rows,
+and ability-score bonus-spell rows. Generic rows preserve extracted cell text
+without guessing the meaning of columns, while the full table and page text
+remain indexed as context. Table boundaries rely on the PDF's extracted text
+layout; adjacent side-by-side tables or merged cells may remain searchable in
+page text without becoming separate row records. These records are embedded
+with Ollama and upserted into the configured Qdrant collection. Before
+reindexing a PDF, the importer removes previously indexed points with that
+PDF's filename; therefore keep filenames unique across books. Reingesting the
+PDFs after importer changes refreshes their stored metadata and vectors.
 
 Class tables are indexed both as complete captioned table blocks and as
 individual normalized spell rows. Each normalized row also carries its
 original extracted row text, retaining columns such as attack bonuses, saves,
 special features, and spell counts in the row's searchable text.
+Casting abilities are attached only when the extracted text contains a
+class-specific rule linking that class and ability; ambiguous nearby text
+does not establish the ability.
+Class progression tables also get structured per-level base attack bonus rows,
+which let the API add BAB contributions across multiclass characters instead
+of selecting only the highest-level class. The same indexed rows include
+Fortitude, Reflex, and Will base-save contributions, which the API sums
+independently for multiclass saving-throw questions.
 
 Watch for a final `Done. Indexed ...` message. If a class row is not
 normalized, preview its PDF page and inspect the extracted table heading and
@@ -243,6 +256,7 @@ Try questions for different classes, for example:
 - “How many spells does a 5th-level cleric get?”
 - “How many 5th-level spells does an 11th-level wizard get?”
 - “How many 5th-level spells does an 11th-level wizard with Intelligence 20 get?”
+- “What is the BAB of a barbarian 3/fighter 4 character?”
 
 The API distinguishes base class-table slots from bonus spells and only adds
 bonus spells when it can identify the class's casting ability and the matching

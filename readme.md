@@ -153,6 +153,11 @@ collection. Before reindexing a PDF, it removes previously indexed points with
 that PDF's filename; therefore keep filenames unique across books. Reingesting
 the PDFs after importer changes refreshes their stored metadata and vectors.
 
+Class tables are indexed both as complete captioned table blocks and as
+individual normalized spell rows. Each normalized row also carries its
+original extracted row text, retaining columns such as attack bonuses, saves,
+special features, and spell counts in the row's searchable text.
+
 Watch for a final `Done. Indexed ...` message. If a class row is not
 normalized, preview its PDF page and inspect the extracted table heading and
 rows. Scanned/image-only PDFs may need OCR before this text-based ingestion

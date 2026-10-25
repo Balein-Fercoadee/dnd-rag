@@ -220,8 +220,8 @@ def test_unlisted_multiword_caster_name_is_resolved_from_indexed_table(
 def test_live_api_spell_question(
     question: str, expected: tuple[str, ...]
 ) -> None:
-    base_url = "http://10.0.0.103:8000/v1"
-    api_key = "1440aafdcf60094b898ec3635bc0a616e59c18eb406d436533218e1ddd5abb9d"  # os.getenv("RAG_TEST_API_KEY")
+    base_url = os.getenv("RAG_TEST_BASE_URL")
+    api_key = os.getenv("RAG_TEST_API_KEY")
     if not base_url or not api_key:
         pytest.skip("Set RAG_TEST_BASE_URL and RAG_TEST_API_KEY to enable live tests")
 

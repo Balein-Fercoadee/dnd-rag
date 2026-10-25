@@ -166,8 +166,14 @@ def normalize_spell_table_rows(table_text: str) -> list[str]:
     if not spell_levels:
         return []
 
+    first_data_index = next(
+        index for index, line in enumerate(lines) if TABLE_DATA_ROW.match(line)
+    )
+    original_header = " ".join(
+        line.strip() for line in lines[:first_data_index] if line.strip()
+    )
     normalized = []
-    for line in lines:
+    for line_index, line in enumerate(lines):
         if not TABLE_DATA_ROW.match(line):
             continue
         tokens = line.split()
@@ -189,8 +195,18 @@ def normalize_spell_table_rows(table_text: str) -> list[str]:
                 else ordinal_number(int(spell_level))
             )
             entries.append(f"{label}-level: {count}")
+        original_row_lines = [line.strip()]
+        for continuation in lines[line_index + 1 :]:
+            if TABLE_CAPTION.search(continuation) or TABLE_DATA_ROW.match(continuation):
+                break
+            if continuation.strip():
+                original_row_lines.append(continuation.strip())
+        original_row = " ".join(original_row_lines)
         normalized.append(
-            f"Class level {class_level}; spells per day: " + "; ".join(entries) + "."
+            f"Class level {class_level}; spells per day: "
+            + "; ".join(entries)
+            + f". Original table columns: {original_header}."
+            + f" Original table row: {original_row}"
         )
     return normalized
 

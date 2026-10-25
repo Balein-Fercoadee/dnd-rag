@@ -7,6 +7,8 @@ import requests
 from fastapi.testclient import TestClient
 
 import app as rag_app
+import rag_retrieval
+import rag_rules
 
 SOURCE = "Player's Handbook I. Core Rulebook I v3.5.pdf"
 
@@ -26,7 +28,7 @@ def class_row(
         "source": SOURCE,
         "page": page,
         "text": (
-            f"Class level {rag_app.ordinal_number(class_level)}; "
+            f"Class level {rag_rules.ordinal_number(class_level)}; "
             f"spells per day: {counts}"
         ),
     }
@@ -99,6 +101,13 @@ BONUS_20 = bonus_row(
     "0th-level: 0; 1st-level: 1; 2nd-level: 1; 3rd-level: 1; "
     "4th-level: 1; 5th-level: 1; 6th-level: 0; 7th-level: 0; "
     "8th-level: 0; 9th-level: 0.",
+)
+BONUS_16 = bonus_row(
+    "16-17",
+    "0th-level: 0; 1st-level: 1; 2nd-level: 1; 3rd-level: 1; "
+    "4th-level: 1; 5th-level: 0; 6th-level: 0; 7th-level: 0; "
+    "8th-level: 0; 9th-level: 0.",
+    modifier=3,
 )
 
 
@@ -250,7 +259,7 @@ def test_multiclass_bab_adds_each_class_progression(
 def test_multiclass_bab_query_finds_all_class_level_pairs() -> None:
     question = "What is the BAB of a barbarian 3/fighter 4 character?"
 
-    assert rag_app.requested_class_levels(
+    assert rag_rules.requested_class_levels(
         question,
         {"Barbarian", "Fighter", "Wizard"},
     ) == [("Barbarian", 3), ("Fighter", 4)]
@@ -259,7 +268,7 @@ def test_multiclass_bab_query_finds_all_class_level_pairs() -> None:
 def test_multiclass_spell_query_returns_levels_in_question_order() -> None:
     question = "How many spells does a 5th level bard/5th level wizard get per day?"
 
-    assert rag_app.requested_class_levels(question, {"Bard", "Wizard"}) == [
+    assert rag_rules.requested_class_levels(question, {"Bard", "Wizard"}) == [
         ("Bard", 5),
         ("Wizard", 5),
     ]
@@ -305,6 +314,24 @@ def test_multiclass_spell_query_applies_each_class_ability_bonus_separately(
     assert answer.count("1st-level: 3 base + 1 bonus = 4") == 2
 
 
+def test_multiclass_spell_query_parses_ability_scores_stated_with_is(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer = ask(
+        client,
+        "How many spells does a 5th level bard/5th level wizard get per day if their Charisma is 18 and Intelligence is 16?",
+        [BARD_5, WIZARD_5, BONUS_18, BONUS_16],
+        monkeypatch,
+    )
+
+    assert "1st-level: 3 base + 1 bonus = 4" in answer
+    assert "2nd-level: 1 base + 1 bonus = 2" in answer
+    assert "2nd-level: 2 base + 1 bonus = 3" in answer
+    assert "3rd-level: 1 base + 1 bonus = 2" in answer
+    assert "Charisma score, which was not provided" not in answer
+    assert "Intelligence score, which was not provided" not in answer
+
+
 def test_multiclass_spell_row_retrieval_returns_every_requested_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -328,9 +355,9 @@ def test_multiclass_spell_row_retrieval_returns_every_requested_class(
             },
         ),
     ]
-    monkeypatch.setattr(rag_app.qdrant, "scroll", lambda **_kwargs: (rows, None))
+    monkeypatch.setattr(rag_retrieval.qdrant, "scroll", lambda **_kwargs: (rows, None))
 
-    points = rag_app.retrieve_class_spell_row(
+    points = rag_retrieval.retrieve_class_spell_row(
         "How many spells does a 5th level bard/5th level wizard get per day?"
     )
 
@@ -377,12 +404,12 @@ def test_retrieve_gets_bonus_rows_for_each_caster_ability(
             },
         ),
         SimpleNamespace(
-            id="bonus-20",
+            id="bonus-16",
             payload={
                 "kind": "bonus_spell_row",
                 "source": SOURCE,
                 "page": 9,
-                "text": BONUS_20["text"],
+                "text": BONUS_16["text"],
             },
         ),
     ]
@@ -393,16 +420,16 @@ def test_retrieve_gets_bonus_rows_for_each_caster_ability(
         scroll_calls += 1
         return (spell_rows if scroll_calls == 1 else bonus_rows), None
 
-    monkeypatch.setattr(rag_app, "embed", lambda _question: [0.0])
+    monkeypatch.setattr(rag_retrieval, "embed", lambda _question: [0.0])
     monkeypatch.setattr(
-        rag_app.qdrant,
+        rag_retrieval.qdrant,
         "query_points",
         lambda **_kwargs: SimpleNamespace(points=[]),
     )
-    monkeypatch.setattr(rag_app.qdrant, "scroll", fake_scroll)
+    monkeypatch.setattr(rag_retrieval.qdrant, "scroll", fake_scroll)
 
-    passages = rag_app.retrieve(
-        "How many spells does a 5th level bard with 18 Charisma/5th level wizard with 20 Intelligence get per day?"
+    passages = rag_retrieval.retrieve(
+        "How many spells does a 5th level bard/5th level wizard get per day if their Charisma is 18 and Intelligence is 16?"
     )
 
     assert {passage["kind"] for passage in passages} == {
@@ -413,7 +440,7 @@ def test_retrieve_gets_bonus_rows_for_each_caster_ability(
         passage["text"].split("Ability score ", 1)[1].split(" ", 1)[0]
         for passage in passages
         if passage["kind"] == "bonus_spell_row"
-    } == {"18-19", "20-21"}
+    } == {"18-19", "16-17"}
 
 
 def test_multiclass_saving_throws_add_each_class_contribution(

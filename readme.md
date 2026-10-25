@@ -9,8 +9,12 @@ The expected layout on the Ubuntu host is:
 ```text
 ~/dnd-rag/
 ├── app.py
-├── ingest_v2.py
+├── ingest.py
+├── rag_config.py
+├── rag_retrieval.py
+├── rag_rules.py
 ├── requirements-rag-service.txt
+├── table_extraction.py
 └── pdfs/
     └── *.pdf
 ```
@@ -66,7 +70,8 @@ curl http://127.0.0.1:6333/healthz
 
 ## 2. Prepare the Python service
 
-Copy `app.py`, `ingest_v2.py`, and `requirements-rag-service.txt` into
+Copy `app.py`, `ingest.py`, `rag_config.py`, `rag_retrieval.py`,
+`rag_rules.py`, `table_extraction.py`, and `requirements-rag-service.txt` into
 `~/dnd-rag`. Create the PDF directory and a virtual environment:
 
 ```bash
@@ -131,19 +136,19 @@ are **PDF page numbers**, which may differ from printed page numbers:
 ```bash
 cd "$HOME/dnd-rag"
 . .venv/bin/activate
-python ingest_v2.py --pdf "pdfs/Player's Handbook.pdf" --preview-page 56
+python ingest.py --pdf "pdfs/Player's Handbook.pdf" --preview-page 56
 ```
 
 Ingest all PDFs directly in `PDF_DIR`:
 
 ```bash
-python ingest_v2.py
+python ingest.py
 ```
 
 Or ingest just one PDF:
 
 ```bash
-python ingest_v2.py --pdf "pdfs/Player's Handbook.pdf"
+python ingest.py --pdf "pdfs/Player's Handbook.pdf"
 ```
 
 The importer extracts layout-preserving page text, captioned tables, generic
@@ -179,7 +184,15 @@ normalized, preview its PDF page and inspect the extracted table heading and
 rows. Scanned/image-only PDFs may need OCR before this text-based ingestion
 can extract their contents.
 
+In the code, `ingest.py` handles PDF collection, embedding, and Qdrant
+updates; `table_extraction.py` contains table detection and row normalization.
+
 ## 5. Run the API
+
+The API is organized by responsibility: `app.py` exposes the FastAPI endpoints,
+`rag_config.py` holds runtime settings and parsing patterns, `rag_retrieval.py`
+handles Ollama embeddings and Qdrant retrieval, and `rag_rules.py` contains
+rule parsing and structured answers.
 
 For a temporary foreground run:
 
@@ -305,7 +318,7 @@ service and successfully ingested rulebooks.
 
 ## Updating code or PDFs
 
-After changing the importer, copy the updated `ingest_v2.py` to Ubuntu and
+After changing the importer, copy the updated `ingest.py` to Ubuntu and
 reingest the affected PDFs. After changing the API, copy the updated `app.py`
 and restart the service:
 

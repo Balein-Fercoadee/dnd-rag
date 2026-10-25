@@ -457,6 +457,11 @@ def infer_class_spellcasting_ability(
     class_subject = rf"(?:a|an|the)\s+{escaped_class}s?"
     explicit_class_rules = (
         re.compile(
+            rf"\b(?P<ability>Intelligence|Wisdom|Charisma)\s+determines"
+            rf".{{0,180}}?\b(?:a|an|the)\s+{escaped_class}\s+can cast\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
             rf"\b(?P<ability>Intelligence|Wisdom|Charisma)\s+determines\s+"
             rf"how powerful a spell {class_subject}\s+can cast\b",
             re.IGNORECASE,

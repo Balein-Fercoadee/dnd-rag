@@ -177,9 +177,16 @@ def requested_class_levels(question: str, class_names: set[str]) -> list[tuple[s
         for pattern in patterns:
             match = pattern.search(question)
             if match:
-                requested.append((class_name, int(match.group("level"))))
+                requested.append(
+                    (
+                        match.start(),
+                        class_name,
+                        int(match.group("level")),
+                    )
+                )
                 break
-    return requested
+    requested.sort(key=lambda item: item[0])
+    return [(class_name, level) for _, class_name, level in requested]
 
 
 def consistent_class_ability(passages: list[dict[str, Any]]) -> str | None:
@@ -254,7 +261,6 @@ def retrieve_class_spell_row(question: str) -> list[Any]:
         with_payload=True,
     )
     matches = []
-    seen_sources = set()
     class_rows = []
     while True:
         for point in points:
@@ -273,26 +279,33 @@ def retrieve_class_spell_row(question: str) -> list[Any]:
     class_names = {
         name for point in class_rows if (name := class_name_from_point(point))
     }
-    requested = requested_class_level(question, class_names)
-    if requested is None:
+    requested = requested_class_levels(question, class_names)
+    if not requested:
         return matches
-    requested_name, expected_level = requested
-    for point in class_rows:
-        payload = point.payload or {}
-        point_name = class_name_from_point(point)
-        if point_name is None or point_name.casefold() != requested_name.casefold():
-            continue
-        level = payload.get("class_level")
-        if not isinstance(level, int):
-            text = payload.get("text")
-            row_match = CLASS_LEVEL_ROW_PATTERN.search(text) if isinstance(text, str) else None
-            level = int(row_match.group("level")) if row_match else None
-        source = payload.get("source")
-        if level == expected_level and source not in seen_sources:
-            matches.append(point)
-            seen_sources.add(source)
-            if len(matches) >= BONUS_ROW_LIMIT:
-                break
+    for requested_name, expected_level in requested:
+        class_matches = 0
+        class_sources = set()
+        for point in class_rows:
+            payload = point.payload or {}
+            point_name = class_name_from_point(point)
+            if point_name is None or point_name.casefold() != requested_name.casefold():
+                continue
+            level = payload.get("class_level")
+            if not isinstance(level, int):
+                text = payload.get("text")
+                row_match = (
+                    CLASS_LEVEL_ROW_PATTERN.search(text)
+                    if isinstance(text, str)
+                    else None
+                )
+                level = int(row_match.group("level")) if row_match else None
+            source = payload.get("source")
+            if level == expected_level and source not in class_sources:
+                matches.append(point)
+                class_sources.add(source)
+                class_matches += 1
+                if class_matches >= BONUS_ROW_LIMIT:
+                    break
     return matches
 
 
@@ -355,19 +368,10 @@ def retrieve(question: str) -> list[dict[str, Any]]:
         )
         points = list(result.points)
 
-        ability_match = ABILITY_SCORE_PATTERN.search(question)
         has_spell_question = "spell" in question.lower()
         has_bab_question = BASE_ATTACK_BONUS_QUESTION.search(question) is not None
         has_base_save_question = BASE_SAVE_QUESTION.search(question) is not None
         class_points = retrieve_class_spell_row(question) if has_spell_question else []
-        class_ability = consistent_class_ability(
-            [
-                {
-                    "class_ability": (point.payload or {}).get("class_ability"),
-                }
-                for point in class_points
-            ]
-        )
         if class_points:
             class_point_ids = {point.id for point in class_points}
             points = class_points + [
@@ -381,22 +385,34 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                 point for point in progression_points if point.id not in seen_ids
             )
 
-        if (
-            ability_match
-            and has_spell_question
-            and class_ability is not None
-            and ability_match.group("ability").lower() == class_ability
-        ):
-            score = ability_match.group("score_before") or ability_match.group("score_after")
-            if score is not None:
-                ability_score = int(score)
+        if has_spell_question and class_points:
+            ability_scores = {
+                match.group("ability").lower(): int(score)
+                for match in ABILITY_SCORE_PATTERN.finditer(question)
+                if (
+                    score := match.group("score_before")
+                    or match.group("score_after")
+                )
+                is not None
+            }
+            needed_scores = {
+                ability_scores[ability]
+                for point in class_points
+                if isinstance(
+                    ability := (point.payload or {}).get("class_ability"),
+                    str,
+                )
+                and ability.casefold() in ability_scores
+            }
+            seen_ids = {point.id for point in points}
+            for ability_score in needed_scores:
                 targeted_points = retrieve_bonus_spell_rows(ability_score)
-                seen_ids = {point.id for point in points}
                 points.extend(
                     point
                     for point in targeted_points
                     if point.id not in seen_ids
                 )
+                seen_ids.update(point.id for point in targeted_points)
     except HTTPException:
         raise
     except Exception as exc:
@@ -596,41 +612,8 @@ def structured_spell_slot_answer(
         for passage in passages
         if isinstance(passage.get("class_name"), str)
     }
-    requested = requested_class_level(question, class_names)
-    if requested is None:
-        return None
-    requested_class, requested_class_level_value = requested
-    base_passage = next(
-        (
-            passage
-            for passage in passages
-            if passage.get("kind") == "table_row"
-            and isinstance(passage.get("class_name"), str)
-            and passage.get("class_name", "").casefold() == requested_class.casefold()
-            and passage.get("class_level") == requested_class_level_value
-        ),
-        None,
-    )
-    if base_passage is None:
-        return None
-
-    caster_class = str(base_passage["class_name"])
-    level = int(base_passage["class_level"])
-    caster_ability = consistent_class_ability(
-        [
-            passage
-            for passage in passages
-            if passage.get("kind") == "table_row"
-            and isinstance(passage.get("class_name"), str)
-            and passage["class_name"].casefold() == requested_class.casefold()
-            and passage.get("class_level") == requested_class_level_value
-        ]
-    )
-    base_counts = spell_slot_counts(base_passage["text"])
-    available_levels = {
-        label: count for label, count in base_counts.items() if count is not None
-    }
-    if not available_levels:
+    requested_classes = requested_class_levels(question, class_names)
+    if not requested_classes:
         return None
 
     requested_level = (
@@ -638,102 +621,125 @@ def structured_spell_slot_answer(
         if spell_levels
         else None
     )
-    ability_match = ABILITY_SCORE_PATTERN.search(question)
-    bonus_counts: dict[str, int | None] = {}
-    bonus_citation = ""
-    ability_note = ""
-    if not isinstance(caster_ability, str):
-        ability_note = (
-            " The class's spellcasting ability could not be established from "
-            "the indexed class description, so bonus spells were not applied."
-        )
-    elif ability_match is None:
-        ability_note = (
-            f" Total bonus spells depend on the caster's "
-            f"{caster_ability.capitalize()} score, which was not provided."
-        )
-    else:
-        mentioned_ability = ability_match.group("ability").lower()
-        if mentioned_ability != caster_ability:
+    ability_scores = {}
+    mentioned_abilities = set()
+    for match in ABILITY_SCORE_PATTERN.finditer(question):
+        ability = match.group("ability").lower()
+        mentioned_abilities.add(ability)
+        score = match.group("score_before") or match.group("score_after")
+        if score is not None:
+            ability_scores[ability] = int(score)
+
+    class_summaries = []
+    for requested_class, requested_class_level_value in requested_classes:
+        class_rows = [
+            passage
+            for passage in passages
+            if passage.get("kind") == "table_row"
+            and isinstance(passage.get("class_name"), str)
+            and passage["class_name"].casefold() == requested_class.casefold()
+            and passage.get("class_level") == requested_class_level_value
+        ]
+        base_passage = next(iter(class_rows), None)
+        if base_passage is None:
+            return None
+
+        caster_class = str(base_passage["class_name"])
+        level = int(base_passage["class_level"])
+        caster_ability = consistent_class_ability(class_rows)
+        base_counts = spell_slot_counts(base_passage["text"])
+        available_levels = {
+            label: count for label, count in base_counts.items() if count is not None
+        }
+        if not available_levels:
+            return None
+
+        bonus_counts: dict[str, int | None] = {}
+        bonus_citation = ""
+        ability_note = ""
+        if not isinstance(caster_ability, str):
             ability_note = (
-                f" {mentioned_ability.capitalize()} does not grant bonus spells to a "
-                f"{caster_class}; bonus spells depend on "
-                f"{caster_ability.capitalize()}, which was not provided."
+                " The class's spellcasting ability could not be established from "
+                "the indexed class description, so bonus spells were not applied."
             )
-        else:
-            score_value = (
-                ability_match.group("score_before")
-                or ability_match.group("score_after")
-            )
-            if score_value is None:
+        elif caster_ability not in ability_scores:
+            if mentioned_abilities and caster_ability not in mentioned_abilities:
+                mentioned = ", ".join(
+                    ability.capitalize() for ability in sorted(mentioned_abilities)
+                )
+                ability_note = (
+                    f" {mentioned} does not grant bonus spells to a {caster_class}; "
+                    f"bonus spells depend on {caster_ability.capitalize()}, "
+                    "which was not provided."
+                )
+            else:
                 ability_note = (
                     f" Total bonus spells depend on the caster's "
                     f"{caster_ability.capitalize()} score, which was not provided."
                 )
-            else:
-                ability_score = int(score_value)
-                expected_range = bonus_score_range(ability_score)
-                bonus_passage = next(
-                    (
-                        passage
-                        for passage in passages
-                        if passage.get("kind") == "bonus_spell_row"
-                        and (
-                            range_match := ABILITY_SCORE_RANGE_PATTERN.search(
-                                passage["text"]
-                            )
+        else:
+            ability_score = ability_scores[caster_ability]
+            expected_range = bonus_score_range(ability_score)
+            bonus_passage = next(
+                (
+                    passage
+                    for passage in passages
+                    if passage.get("kind") == "bonus_spell_row"
+                    and (
+                        range_match := ABILITY_SCORE_RANGE_PATTERN.search(
+                            passage["text"]
                         )
-                        is not None
-                        and (
-                            int(range_match.group("low")),
-                            int(range_match.group("high")),
-                        )
-                        == expected_range
-                    ),
-                    None,
-                )
-                if bonus_passage is None:
-                    ability_note = (
-                        f" The bonus-spell row for {caster_ability} "
-                        f"{ability_score} was not retrieved, so totals cannot be "
-                        "confirmed."
                     )
-                else:
-                    bonus_counts = spell_slot_counts(bonus_passage["text"])
-                    bonus_citation = f" {citation(bonus_passage)}"
+                    is not None
+                    and (
+                        int(range_match.group("low")),
+                        int(range_match.group("high")),
+                    )
+                    == expected_range
+                ),
+                None,
+            )
+            if bonus_passage is None:
+                ability_note = (
+                    f" The bonus-spell row for {caster_ability} "
+                    f"{ability_score} was not retrieved, so totals cannot be "
+                    "confirmed."
+                )
+            else:
+                bonus_counts = spell_slot_counts(bonus_passage["text"])
+                bonus_citation = f" Bonus spells {citation(bonus_passage)}."
 
-    labels = (
-        [spell_level_label(requested_level)]
-        if requested_level is not None
-        else [
-            spell_slot_label
-            for spell_slot_label in sorted(
+        labels = (
+            [spell_level_label(requested_level)]
+            if requested_level is not None
+            else sorted(
                 available_levels,
                 key=lambda label: int(re.match(r"\d+", label).group()),
             )
-        ]
-    )
-    summaries = []
-    for label in labels:
-        base_count = available_levels.get(label)
-        if base_count is None:
-            continue
-        bonus_count = bonus_counts.get(label, 0)
-        total = base_count + (bonus_count or 0)
-        summary = f"{label}: {base_count} base"
-        if bonus_counts:
-            summary += f" + {bonus_count or 0} bonus = {total}"
-        summaries.append(summary)
-    if not summaries:
-        return None
+        )
+        summaries = []
+        for label in labels:
+            base_count = available_levels.get(label)
+            if base_count is None:
+                continue
+            bonus_count = bonus_counts.get(label, 0)
+            total = base_count + (bonus_count or 0)
+            summary = f"{label}: {base_count} base"
+            if bonus_counts:
+                summary += f" + {bonus_count or 0} bonus = {total}"
+            summaries.append(summary)
+        if not summaries:
+            return None
 
-    return (
-        f"For an {ordinal_number(level)}-level {caster_class}, spells per day are "
-        + "; ".join(summaries)
-        + f" {citation(base_passage)}."
-        + (f" Bonus spells{bonus_citation}." if bonus_counts else "")
-        + ability_note
-    )
+        class_summaries.append(
+            f"For a {ordinal_number(level)}-level {caster_class}, spells per day are "
+            + "; ".join(summaries)
+            + f" {citation(base_passage)}."
+            + bonus_citation
+            + ability_note
+        )
+
+    return " ".join(class_summaries)
 
 
 @app.get("/health")

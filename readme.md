@@ -170,6 +170,9 @@ which let the API add BAB contributions across multiclass characters instead
 of selecting only the highest-level class. The same indexed rows include
 Fortitude, Reflex, and Will base-save contributions, which the API sums
 independently for multiclass saving-throw questions.
+For multiclass spell questions, the API reports each class's spells-per-day
+progression separately and applies bonus spells only from that class's
+spellcasting ability when the relevant ability score is provided.
 
 Watch for a final `Done. Indexed ...` message. If a class row is not
 normalized, preview its PDF page and inspect the extracted table heading and

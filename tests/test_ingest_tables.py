@@ -69,6 +69,15 @@ def test_wizard_ability_is_inferred_from_wizard_specific_rules() -> None:
     assert infer_class_spellcasting_ability("Wizard", [wizard_rules]) == "intelligence"
 
 
+def test_bard_ability_is_inferred_when_pdf_columns_interrupt_the_sentence() -> None:
+    bard_rule = (
+        "Charisma determines how teachers train them in powerful a spell "
+        "a bard can cast, how many spells he can cast per day."
+    )
+
+    assert infer_class_spellcasting_ability("Bard", [bard_rule]) == "charisma"
+
+
 def test_hyphenated_pdf_line_break_does_not_hide_class_ability() -> None:
     cleric_rule = (
         "Abilities: Wisdom determines how pow- erful a spell a cleric can cast, "

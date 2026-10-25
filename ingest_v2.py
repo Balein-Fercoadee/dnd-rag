@@ -64,7 +64,10 @@ BONUS_SPELL_LEVELS = (
 
 
 def split_page_text(text: str) -> list[str]:
-    """Split extracted page text into overlapping chunks for retrieval."""
+    """Split extracted page text into overlapping chunks.
+
+    Overlap preserves context at chunk boundaries during retrieval.
+    """
     lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
     text = "\n".join(lines).strip()
     if not text:

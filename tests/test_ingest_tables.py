@@ -1,4 +1,4 @@
-from table_extraction import (
+from extraction.table_extraction import (
     extract_table_blocks,
     extract_table_data_rows,
     infer_class_spellcasting_ability,

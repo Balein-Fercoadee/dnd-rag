@@ -7,8 +7,7 @@ import requests
 from fastapi.testclient import TestClient
 
 import app as rag_app
-import rag_retrieval
-import rag_rules
+from rag import rag_retrieval, rag_rules
 
 SOURCE = "Player's Handbook I. Core Rulebook I v3.5.pdf"
 

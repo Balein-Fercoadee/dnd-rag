@@ -6,11 +6,18 @@ import requests
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from rag_config import API_KEY, CHAT_MODEL, COLLECTION, OLLAMA_URL
-from rag_retrieval import qdrant, retrieve
-from rag_rules import (
+from rag.rag_config import (
+    API_KEY,
+    CHAT_MODEL,
+    COLLECTION,
+    FEAT_QUALIFICATION_QUESTION,
+    OLLAMA_URL,
+)
+from rag.rag_retrieval import qdrant, retrieve
+from rag.rag_rules import (
     ABILITY_SCORE_PATTERN,
     consistent_class_ability,
+    feat_class_level_prerequisite_answer,
     requested_class_level,
     structured_base_attack_bonus_answer,
     structured_base_saves_answer,
@@ -92,7 +99,9 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Request must include a non-empty user message")
 
     passages = retrieve(question)
-    structured_answer = structured_base_saves_answer(question, passages)
+    structured_answer = feat_class_level_prerequisite_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_base_saves_answer(question, passages)
     if structured_answer is None:
         structured_answer = structured_base_attack_bonus_answer(question, passages)
     if structured_answer is None:
@@ -170,6 +179,20 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
                     f"spellcasting ability is {relevant_ability}; use only that "
                     "ability's bonus-spell row."
                 )
+        if FEAT_QUALIFICATION_QUESTION.search(question):
+            system_prompt += (
+                " For feat qualification questions, use the retrieved feat's "
+                "prerequisites and compare each one with the character details in "
+                "the question. Evaluate eligibility when the feat is selected, "
+                "including the stated character level. A class-level prerequisite "
+                "requires levels in that specific class, not merely the same total "
+                "character level or levels in another class. Do not assume "
+                "unmentioned feats, ability scores, base attack bonus, or class "
+                "levels. Caster level is distinct from character level and class "
+                "level; never infer it from a non-spellcasting class or total "
+                "character level. If a prerequisite is not established, say which "
+                "detail is missing rather than claiming the character qualifies."
+            )
         system_prompt += (
             "\n\n"
             f"Retrieved passages:\n{context}"

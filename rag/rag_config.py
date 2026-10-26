@@ -87,3 +87,41 @@ BASE_SAVE_VALUE_PATTERN = re.compile(
     r"Reflex\s+\+(?P<reflex>\d+),\s*Will\s+\+(?P<will>\d+)",
     re.IGNORECASE,
 )
+
+
+FEAT_QUALIFICATION_QUESTION = re.compile(
+    r"\b(?:qualif(?:y|ies|ication)|eligib(?:le|ility)|prerequisites?)\b"
+    r"|\b(?:can|could|may)\b.*\b(?:take|select|choose)\b",
+    re.IGNORECASE,
+)
+
+
+FEAT_NAME_IN_QUESTION = re.compile(
+    r"\b(?:take|select|choose|gain)\s+(?:the\s+)?"
+    r"(?P<name>[\w][\w'’ -]{0,59}?)"
+    r"(?=(?:\s+(?:as\s+a\s+)?feat)?(?:\s+(?:at|when|upon)\b|[?.!,]|$))",
+    re.IGNORECASE,
+)
+
+
+CHARACTER_CLASS_LEVEL_PATTERN = re.compile(
+    r"\b(?P<level>\d{1,2})(?:st|nd|rd|th)?[\s-]+level\s+"
+    r"(?P<class>[a-z][a-z'’-]*"
+    r"(?:\s+(?!qualif(?:y|ies|ication)\b|eligib(?:le|ility)\b|character\b|"
+    r"to\b|at\b|for\b|who\b|with\b|and\b|or\b|take\b|select\b|choose\b|"
+    r"gain\b)[a-z][a-z'’-]*){0,2})",
+    re.IGNORECASE,
+)
+
+
+FEAT_SELECTION_LEVEL_PATTERN = re.compile(
+    r"\b(?:at|by|upon reaching)\s+(?:the\s+)?"
+    r"(?P<level>\d{1,2})(?:st|nd|rd|th)?[\s-]+level\b",
+    re.IGNORECASE,
+)
+
+
+CASTER_LEVEL_IN_QUESTION = re.compile(
+    r"\bcaster\s+level\s*(?:of\s+)?(?P<level>\d{1,2})(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)

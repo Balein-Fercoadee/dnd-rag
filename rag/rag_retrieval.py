@@ -5,7 +5,7 @@ import requests
 from fastapi import HTTPException
 from qdrant_client import QdrantClient, models as qdrant_models
 
-from rag_config import (
+from .rag_config import (
     ABILITY_SCORE_PATTERN,
     ABILITY_SCORE_RANGE_PATTERN,
     BASE_ATTACK_BONUS_QUESTION,
@@ -13,15 +13,17 @@ from rag_config import (
     CLASS_LEVEL_ROW_PATTERN,
     COLLECTION,
     EMBED_MODEL,
+    FEAT_QUALIFICATION_QUESTION,
     OLLAMA_URL,
     QDRANT_URL,
     RETRIEVAL_LIMIT,
     BONUS_ROW_LIMIT,
 )
-from rag_rules import (
+from .rag_rules import (
     bonus_score_range,
     class_name_from_text,
     consistent_class_ability,
+    feat_name_from_question,
     requested_class_levels,
 )
 
@@ -219,6 +221,33 @@ def retrieve(question: str) -> list[dict[str, Any]]:
             with_payload=True,
         )
         points = list(result.points)
+
+        if FEAT_QUALIFICATION_QUESTION.search(question):
+            feat_name = feat_name_from_question(question)
+            feat_query = (
+                f"{feat_name} feat prerequisites D&D 3.5"
+                if feat_name
+                else f"{question} D&D 3.5 feat prerequisites and requirements"
+            )
+            feat_result = qdrant.query_points(
+                collection_name=COLLECTION,
+                query=embed(feat_query),
+                limit=RETRIEVAL_LIMIT,
+                with_payload=True,
+            )
+            feat_points = list(feat_result.points)
+            if feat_name:
+                feat_points.sort(
+                    key=lambda point: feat_name.casefold()
+                    not in str((point.payload or {}).get("text", "")).casefold()
+                )
+            seen_ids = set()
+            prioritized_points = []
+            for point in [*feat_points, *points]:
+                if point.id not in seen_ids:
+                    prioritized_points.append(point)
+                    seen_ids.add(point.id)
+            points = prioritized_points
 
         has_spell_question = "spell" in question.lower()
         has_bab_question = BASE_ATTACK_BONUS_QUESTION.search(question) is not None

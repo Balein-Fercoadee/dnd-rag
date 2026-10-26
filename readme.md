@@ -10,11 +10,15 @@ The expected layout on the Ubuntu host is:
 ~/dnd-rag/
 ├── app.py
 ├── ingest.py
-├── rag_config.py
-├── rag_retrieval.py
-├── rag_rules.py
+├── rag/
+│   ├── __init__.py
+│   ├── rag_config.py
+│   ├── rag_retrieval.py
+│   └── rag_rules.py
+├── extraction/
+│   ├── __init__.py
+│   └── table_extraction.py
 ├── requirements-rag-service.txt
-├── table_extraction.py
 └── pdfs/
     └── *.pdf
 ```
@@ -70,9 +74,9 @@ curl http://127.0.0.1:6333/healthz
 
 ## 2. Prepare the Python service
 
-Copy `app.py`, `ingest.py`, `rag_config.py`, `rag_retrieval.py`,
-`rag_rules.py`, `table_extraction.py`, and `requirements-rag-service.txt` into
-`~/dnd-rag`. Create the PDF directory and a virtual environment:
+Copy `app.py`, `ingest.py`, `rag/`, `extraction/`, and
+`requirements-rag-service.txt` into `~/dnd-rag`. Create the PDF directory and a
+virtual environment:
 
 ```bash
 cd "$HOME/dnd-rag"
@@ -185,14 +189,16 @@ rows. Scanned/image-only PDFs may need OCR before this text-based ingestion
 can extract their contents.
 
 In the code, `ingest.py` handles PDF collection, embedding, and Qdrant
-updates; `table_extraction.py` contains table detection and row normalization.
+updates; `extraction/table_extraction.py` contains table detection and row
+normalization.
 
 ## 5. Run the API
 
 The API is organized by responsibility: `app.py` exposes the FastAPI endpoints,
-`rag_config.py` holds runtime settings and parsing patterns, `rag_retrieval.py`
-handles Ollama embeddings and Qdrant retrieval, and `rag_rules.py` contains
-rule parsing and structured answers.
+the `rag/` package holds the API's RAG modules: `rag_config.py` contains runtime
+settings and parsing patterns, `rag_retrieval.py` handles Ollama embeddings and
+Qdrant retrieval, and `rag_rules.py` contains rule parsing and structured
+answers.
 
 For a temporary foreground run:
 

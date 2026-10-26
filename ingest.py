@@ -7,7 +7,7 @@ from typing import Any
 import pdfplumber
 import requests
 from qdrant_client import QdrantClient, models
-from table_extraction import (
+from extraction.table_extraction import (
     CLASS_LEVEL_VALUE,
     extract_table_blocks,
     extract_table_data_rows,

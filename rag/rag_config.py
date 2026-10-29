@@ -101,6 +101,9 @@ MAXIMUM_SPELL_DAMAGE_QUESTION = re.compile(
 )
 
 
+SPELL_DURATION_QUESTION = re.compile(r"\b(?:duration|how long)\b", re.IGNORECASE)
+
+
 BASE_ATTACK_BONUS_VALUE_PATTERN = re.compile(
     r"\bbase attack bonus:\s*\+(?P<value>\d+)\b",
     re.IGNORECASE,

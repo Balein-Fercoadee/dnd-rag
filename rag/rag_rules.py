@@ -22,6 +22,7 @@ from .rag_config import (
     FEAT_COUNT_QUESTION,
     FEAT_SELECTION_LEVEL_PATTERN,
     MAXIMUM_SPELL_DAMAGE_QUESTION,
+    SPELL_DURATION_QUESTION,
     SPELL_LEVEL_PATTERN,
     SPELL_SLOT_COUNT_PATTERN,
     STARTING_MONEY_QUESTION,
@@ -421,6 +422,100 @@ def structured_spell_maximum_damage_answer(
     return (
         f"Cannot establish the maximum damage for {spell_name.title()} from "
         "the retrieved spell description."
+    )
+
+
+def spell_name_for_duration(question: str) -> str | None:
+    match = re.search(
+        r"\b(?:duration|how long)\s+(?:of|for)\s+"
+        r"(?P<name>[a-z][a-z'’\-]*(?:\s+[a-z][a-z'’\-]*){0,3}?)"
+        r"(?=\s+(?:spell\b|last\b|does\b|is\b|for\s+(?:a\s+)?"
+        r"\d{1,2}(?:st|nd|rd|th)?[\s-]+level\s+caster\b)|[?.!,]|$)",
+        question,
+        re.IGNORECASE,
+    )
+    return match.group("name").strip() if match is not None else None
+
+
+def caster_level_for_duration(question: str) -> int | None:
+    match = CASTER_LEVEL_IN_QUESTION.search(question)
+    if match is None:
+        match = re.search(
+            r"\b(?P<level>\d{1,2})(?:st|nd|rd|th)?[\s-]+level\s+caster\b",
+            question,
+            re.IGNORECASE,
+        )
+    return int(match.group("level")) if match is not None else None
+
+
+def structured_spell_duration_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if SPELL_DURATION_QUESTION.search(question) is None:
+        return None
+    spell_name = spell_name_for_duration(question)
+    if spell_name is None:
+        return None
+
+    heading_pattern = re.compile(
+        rf"\b{re.escape(spell_name)}\s+"
+        r"(?:Abjuration|Conjuration|Divination|Enchantment|Evocation|"
+        r"Illusion|Necromancy|Transmutation)\b",
+        re.IGNORECASE,
+    )
+    duration_pattern = re.compile(
+        r"\bDuration:\s*(?P<duration>.*?)"
+        r"(?=\s+(?:Saving Throw|Spell Resistance):|$)",
+        re.IGNORECASE,
+    )
+    candidates: set[tuple[str, str, int]] = set()
+    for passage in passages:
+        text = passage.get("text")
+        source = passage.get("source")
+        page = passage.get("page")
+        if (
+            not isinstance(text, str)
+            or not isinstance(source, str)
+            or not isinstance(page, int)
+        ):
+            continue
+        normalized_text = re.sub(r"\s+", " ", text)
+        for heading in heading_pattern.finditer(normalized_text):
+            duration_match = duration_pattern.search(
+                normalized_text, heading.end(), heading.end() + 700
+            )
+            if duration_match is not None:
+                duration = duration_match.group("duration").strip().rstrip(" ,;")
+                if duration:
+                    candidates.add((duration, source, page))
+
+    if len(candidates) != 1:
+        return (
+            f"Cannot establish the duration of {spell_name.title()} from "
+            "the retrieved spell description."
+        )
+
+    duration, source, page = next(iter(candidates))
+    caster_level = caster_level_for_duration(question)
+    if caster_level is not None:
+        per_level_match = re.fullmatch(
+            r"(?P<amount>\d+)\s+(?P<unit>rounds?|minutes?|mins?\.?|"
+            r"hours?|days?|weeks?|months?|years?)/level"
+            r"(?:\s+\([^)]*\))?",
+            duration,
+            re.IGNORECASE,
+        )
+        if per_level_match is not None:
+            amount = int(per_level_match.group("amount")) * caster_level
+            unit = per_level_match.group("unit").lower().rstrip(".")
+            unit = {
+                "min": "minute",
+                "mins": "minute",
+            }.get(unit, unit.rstrip("s"))
+            duration = f"{amount} {unit}{'' if amount == 1 else 's'}"
+    return (
+        f"The duration of {spell_name.title()} is {duration}. "
+        f"[{source}, PDF p. {page}]"
     )
 
 

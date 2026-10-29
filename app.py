@@ -25,6 +25,7 @@ from rag.rag_rules import (
     structured_base_saves_answer,
     structured_fighter_feat_count_answer,
     structured_spell_maximum_damage_answer,
+    structured_spell_duration_answer,
     structured_starting_money_answer,
     structured_spell_slot_answer,
 )
@@ -119,6 +120,8 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
         structured_answer = structured_base_attack_bonus_answer(question, passages)
     if structured_answer is None:
         structured_answer = structured_spell_maximum_damage_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_spell_duration_answer(question, passages)
     if structured_answer is None:
         structured_answer = structured_spell_slot_answer(question, passages)
     if structured_answer is not None:

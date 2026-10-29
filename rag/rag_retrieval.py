@@ -19,6 +19,7 @@ from .rag_config import (
     FEAT_QUALIFICATION_QUESTION,
     FEAT_COUNT_QUESTION,
     MAXIMUM_SPELL_DAMAGE_QUESTION,
+    SPELL_DURATION_QUESTION,
     OLLAMA_URL,
     QDRANT_URL,
     RETRIEVAL_LIMIT,
@@ -33,6 +34,7 @@ from .rag_rules import (
     feat_name_from_question,
     requested_class_levels,
     spell_name_for_max_damage,
+    spell_name_for_duration,
 )
 
 qdrant = QdrantClient(url=QDRANT_URL)
@@ -343,6 +345,73 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                     if point.id not in seen_ids:
                         points.append(point)
                         seen_ids.add(point.id)
+
+        if SPELL_DURATION_QUESTION.search(question):
+            spell_name = spell_name_for_duration(question)
+            if spell_name is not None:
+                spell_duration_rules = qdrant.query_points(
+                    collection_name=COLLECTION,
+                    query=embed(
+                        f"D&D 3.5 {spell_name} spell duration Duration field"
+                    ),
+                    limit=RETRIEVAL_LIMIT,
+                    with_payload=True,
+                )
+                seen_ids = {point.id for point in points}
+                for point in spell_duration_rules.points:
+                    if point.id not in seen_ids:
+                        points.append(point)
+                        seen_ids.add(point.id)
+
+                spell_name_pattern = re.compile(
+                    rf"\b{re.escape(spell_name)}\b", re.IGNORECASE
+                )
+                spell_pages = {
+                    (payload["source"], payload["page"])
+                    for point in spell_duration_rules.points
+                    if isinstance(payload := (point.payload or {}), dict)
+                    and payload.get("kind") == "page_text"
+                    and isinstance(payload.get("source"), str)
+                    and isinstance(payload.get("page"), int)
+                    and spell_name_pattern.search(str(payload.get("text", "")))
+                }
+                for source, page in spell_pages:
+                    page_filter = qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="source",
+                                match=qdrant_models.MatchValue(value=source),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="page",
+                                match=qdrant_models.MatchValue(value=page),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="kind",
+                                match=qdrant_models.MatchValue(value="page_text"),
+                            ),
+                        ]
+                    )
+                    page_points, next_offset = qdrant.scroll(
+                        collection_name=COLLECTION,
+                        scroll_filter=page_filter,
+                        limit=256,
+                        with_payload=True,
+                    )
+                    while True:
+                        for point in page_points:
+                            if point.id not in seen_ids:
+                                points.append(point)
+                                seen_ids.add(point.id)
+                        if next_offset is None:
+                            break
+                        page_points, next_offset = qdrant.scroll(
+                            collection_name=COLLECTION,
+                            scroll_filter=page_filter,
+                            limit=256,
+                            offset=next_offset,
+                            with_payload=True,
+                        )
 
         has_spell_question = "spell" in question.lower()
         has_armor_class_question = ARMOR_CLASS_QUESTION.search(question) is not None

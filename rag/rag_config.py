@@ -28,7 +28,7 @@ BONUS_ROW_LIMIT = int(os.getenv("BONUS_ROW_LIMIT", "2"))
 
 ABILITY_SCORE_PATTERN = re.compile(
     r"\b(?:(?P<score_before>\d{1,2})\s+)?"
-    r"(?P<ability>intelligence|wisdom|charisma)"
+    r"(?P<ability>strength|dexterity|constitution|intelligence|wisdom|charisma)"
     r"(?:\s+score)?(?:\s+(?:is|of))?"
     r"(?:\s+(?P<score_after>\d{1,2}))?\b",
     re.IGNORECASE,
@@ -68,6 +68,18 @@ CLASS_TABLE_NAME_PATTERN = re.compile(
 
 
 BASE_ATTACK_BONUS_QUESTION = re.compile(r"\b(?:BAB|base attack bonus)\b", re.IGNORECASE)
+
+
+ATTACK_BONUS_QUESTION = re.compile(
+    r"\battack\s+(?:bonus|rolls?)\b",
+    re.IGNORECASE,
+)
+
+
+ARMOR_CLASS_QUESTION = re.compile(
+    r"\b(?:AC|armor class)\b",
+    re.IGNORECASE,
+)
 
 
 BASE_ATTACK_BONUS_VALUE_PATTERN = re.compile(

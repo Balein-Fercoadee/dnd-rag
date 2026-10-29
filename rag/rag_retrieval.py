@@ -8,6 +8,8 @@ from qdrant_client import QdrantClient, models as qdrant_models
 from .rag_config import (
     ABILITY_SCORE_PATTERN,
     ABILITY_SCORE_RANGE_PATTERN,
+    ARMOR_CLASS_QUESTION,
+    ATTACK_BONUS_QUESTION,
     BASE_ATTACK_BONUS_QUESTION,
     BASE_SAVE_QUESTION,
     CLASS_LEVEL_ROW_PATTERN,
@@ -22,6 +24,7 @@ from .rag_config import (
 from .rag_rules import (
     bonus_score_range,
     class_name_from_text,
+    class_level_descriptors,
     consistent_class_ability,
     feat_name_from_question,
     requested_class_levels,
@@ -250,8 +253,43 @@ def retrieve(question: str) -> list[dict[str, Any]]:
             points = prioritized_points
 
         has_spell_question = "spell" in question.lower()
+        has_armor_class_question = ARMOR_CLASS_QUESTION.search(question) is not None
         has_bab_question = BASE_ATTACK_BONUS_QUESTION.search(question) is not None
+        has_attack_bonus_question = ATTACK_BONUS_QUESTION.search(question) is not None
         has_base_save_question = BASE_SAVE_QUESTION.search(question) is not None
+        if has_armor_class_question:
+            armor_class_rules = qdrant.query_points(
+                collection_name=COLLECTION,
+                query=embed(
+                    "D&D 3.5 Armor Class AC formula base 10 armor bonus "
+                    "shield bonus size modifier Dexterity modifier"
+                ),
+                limit=RETRIEVAL_LIMIT,
+                with_payload=True,
+            )
+            seen_ids = {point.id for point in points}
+            for point in armor_class_rules.points:
+                if point.id not in seen_ids:
+                    points.append(point)
+                    seen_ids.add(point.id)
+
+        if has_attack_bonus_question:
+            attack_rules = qdrant.query_points(
+                collection_name=COLLECTION,
+                query=embed(
+                    "D&D 3.5 melee attack bonus formula base attack bonus "
+                    "Strength modifier size modifier; ranged attack bonus "
+                    "Dexterity modifier"
+                ),
+                limit=RETRIEVAL_LIMIT,
+                with_payload=True,
+            )
+            seen_ids = {point.id for point in points}
+            for point in attack_rules.points:
+                if point.id not in seen_ids:
+                    points.append(point)
+                    seen_ids.add(point.id)
+
         class_points = retrieve_class_spell_row(question) if has_spell_question else []
         if class_points:
             class_point_ids = {point.id for point in class_points}
@@ -259,12 +297,33 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                 point for point in points if point.id not in class_point_ids
             ]
 
-        if has_bab_question or has_base_save_question:
+        if has_bab_question or has_attack_bonus_question or has_base_save_question:
             progression_points = retrieve_class_progression_rows(question)
             seen_ids = {point.id for point in points}
             points.extend(
                 point for point in progression_points if point.id not in seen_ids
             )
+
+            if has_attack_bonus_question:
+                class_names = {
+                    point_name
+                    for point in progression_points
+                    if (point_name := class_name_from_point(point))
+                }
+                for descriptor in class_level_descriptors(question, class_names):
+                    size_rules = qdrant.query_points(
+                        collection_name=COLLECTION,
+                        query=embed(
+                            f"D&D 3.5 {descriptor} creature size category "
+                            "size modifier attack rolls"
+                        ),
+                        limit=RETRIEVAL_LIMIT,
+                        with_payload=True,
+                    )
+                    for point in size_rules.points:
+                        if point.id not in seen_ids:
+                            points.append(point)
+                            seen_ids.add(point.id)
 
         if has_spell_question and class_points:
             ability_scores = {
@@ -287,6 +346,28 @@ def retrieve(question: str) -> list[dict[str, Any]]:
             }
             seen_ids = {point.id for point in points}
             for ability_score in needed_scores:
+                targeted_points = retrieve_bonus_spell_rows(ability_score)
+                points.extend(
+                    point
+                    for point in targeted_points
+                    if point.id not in seen_ids
+                )
+                seen_ids.update(point.id for point in targeted_points)
+
+        if has_attack_bonus_question:
+            ability_scores = {
+                int(score)
+                for match in ABILITY_SCORE_PATTERN.finditer(question)
+                if match.group("ability").casefold()
+                in {"strength", "dexterity"}
+                and (
+                    score := match.group("score_before")
+                    or match.group("score_after")
+                )
+                is not None
+            }
+            seen_ids = {point.id for point in points}
+            for ability_score in ability_scores:
                 targeted_points = retrieve_bonus_spell_rows(ability_score)
                 points.extend(
                     point

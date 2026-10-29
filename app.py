@@ -19,6 +19,8 @@ from rag.rag_rules import (
     consistent_class_ability,
     feat_class_level_prerequisite_answer,
     requested_class_level,
+    structured_base_armor_class_answer,
+    structured_attack_bonus_answer,
     structured_base_attack_bonus_answer,
     structured_base_saves_answer,
     structured_spell_slot_answer,
@@ -101,7 +103,11 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
     passages = retrieve(question)
     structured_answer = feat_class_level_prerequisite_answer(question, passages)
     if structured_answer is None:
+        structured_answer = structured_base_armor_class_answer(question, passages)
+    if structured_answer is None:
         structured_answer = structured_base_saves_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_attack_bonus_answer(question, passages)
     if structured_answer is None:
         structured_answer = structured_base_attack_bonus_answer(question, passages)
     if structured_answer is None:
@@ -136,7 +142,10 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             "question, add the BAB contributions for every class level; never use "
             "only the highest-level class. For multiclass base saving throws, add "
             "the Fortitude, Reflex, and Will base-save contributions from every "
-            "class level independently."
+            "class level independently. Do not confuse base attack bonus with "
+            "total attack bonus: melee attack rolls add Strength and size modifiers, "
+            "while ranged attack rolls add Dexterity, size, and range modifiers. "
+            "State assumptions when character size or other modifiers are unknown."
         )
         ability_match = ABILITY_SCORE_PATTERN.search(question)
         class_rows = [

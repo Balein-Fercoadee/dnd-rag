@@ -154,7 +154,11 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             "class level independently. Do not confuse base attack bonus with "
             "total attack bonus: melee attack rolls add Strength and size modifiers, "
             "while ranged attack rolls add Dexterity, size, and range modifiers. "
-            "State assumptions when character size or other modifiers are unknown."
+            "State assumptions when character size or other modifiers are unknown. "
+            "In a spell's Level line, distinguish class abbreviations from domain "
+            "entries. For example, 'Clr 5, Drd 4, Sun 5, War 5' lists Cleric and "
+            "Druid classes plus the Sun and War domains; Sun and War are not "
+            "classes. Do not expand them into Sun Soul or Warlock."
         )
         ability_match = ABILITY_SCORE_PATTERN.search(question)
         class_rows = [

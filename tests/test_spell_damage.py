@@ -18,9 +18,9 @@ FIREBALL_AND_FLAME_STRIKE = {
         "A fireball spell is an explosion of flame and deals 1d6 points of "
         "fire damage per caster level (maximum 10d6) to every creature in "
         "the area. "
-        "Flame Strike Evocation [Fire]. A flame strike spell produces a vertical "
-        "column of divine fire and deals 1d6 points of damage per caster "
-        "level (maximum 15d6)."
+        "Flame Strike Evocation [Fire]. A flame strikeproduces a vertical "
+        "column of divine fire. The spell deals 1d6 points of damage per "
+        "caster level (maximum 15d6)."
     ),
 }
 
@@ -69,9 +69,9 @@ def test_fireball_max_damage_uses_its_own_cap_not_flame_strikes(
     assert f"{SOURCE}, PDF p. 232" in answer
 
 
-def test_flame_strike_uses_its_own_fifteen_d6_cap() -> None:
+def test_flame_strike_uses_its_own_fifteen_d6_cap_with_extracted_wording() -> None:
     answer = rag_rules.structured_spell_maximum_damage_answer(
-        "What is the maximum damage of Flame Strike?",
+        "what is the max damage for flame strike?",
         [FIREBALL_AND_FLAME_STRIKE],
     )
 

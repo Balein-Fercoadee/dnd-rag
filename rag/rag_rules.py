@@ -377,23 +377,25 @@ def structured_spell_maximum_damage_answer(
         re.IGNORECASE,
     )
     spell_entry_pattern = re.compile(
-        rf"\b{re.escape(spell_name)}\s*spell\b",
+        rf"\b{re.escape(spell_name)}\b",
         re.IGNORECASE,
     )
     candidates: list[tuple[re.Match[str], dict[str, Any]]] = []
-    for passage in passages:
+    seen_candidates: set[tuple[int, int]] = set()
+    for passage_index, passage in enumerate(passages):
         text = passage.get("text")
         if not isinstance(text, str):
             continue
         normalized_text = re.sub(r"\s+", " ", text)
         for spell_entry in spell_entry_pattern.finditer(normalized_text):
             entry_end = min(spell_entry.end() + 700, len(normalized_text))
-            candidates.extend(
-                (match, passage)
-                for match in damage_cap_pattern.finditer(
-                    normalized_text, spell_entry.end(), entry_end
-                )
-            )
+            for match in damage_cap_pattern.finditer(
+                normalized_text, spell_entry.end(), entry_end
+            ):
+                candidate_key = (passage_index, match.start())
+                if candidate_key not in seen_candidates:
+                    candidates.append((match, passage))
+                    seen_candidates.add(candidate_key)
     associated_candidates = [
         (match, passage)
         for match, passage in candidates

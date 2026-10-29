@@ -182,6 +182,48 @@ def test_wizard_uses_intelligence_not_wisdom_for_bonus_spells(
     assert "5th-level: 2 base + 1 bonus" not in answer
 
 
+def test_spell_description_prompt_does_not_expand_domain_entries_as_classes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        rag_app,
+        "retrieve",
+        lambda _question: [
+            {
+                "source": SOURCE,
+                "page": 232,
+                "text": (
+                    "Flame Strike Evocation [Fire] Level: Clr 5, Drd 4, "
+                    "Sun 5, War 5"
+                ),
+            }
+        ],
+    )
+    system_prompts: list[str] = []
+
+    def fake_chat(*_args: object, **kwargs: object) -> SimpleNamespace:
+        request_data = kwargs["json"]
+        system_prompts.append(request_data["messages"][0]["content"])
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"message": {"content": "Flame Strike details."}},
+        )
+
+    monkeypatch.setattr(rag_app.requests, "post", fake_chat)
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen3:8b",
+            "messages": [{"role": "user", "content": "Tell me about Flame Strike"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "Sun and War are not" in system_prompts[0]
+    assert "Do not expand them into Sun Soul or Warlock." in system_prompts[0]
+
+
 def test_ranger_level_eleven_adds_wisdom_bonus_only_to_available_levels(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

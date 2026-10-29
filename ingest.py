@@ -81,7 +81,9 @@ def point_id(source: str, page: int, kind: str, ordinal: int, text: str) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
 
-def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[str, Any]]:
+def collect_pdf(
+    pdf_path: Path, preview_page: int | None = None
+) -> list[dict[str, Any]]:
     """Collect page chunks, generic table rows, and supported semantic rows."""
     records = []
     with pdfplumber.open(pdf_path) as pdf:
@@ -143,9 +145,7 @@ def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[st
                         reflex,
                         will,
                         original_row,
-                    ) in enumerate(
-                        normalize_class_progression_rows(table_text)
-                    ):
+                    ) in enumerate(normalize_class_progression_rows(table_text)):
                         records.append(
                             {
                                 "source": pdf_path.name,
@@ -168,7 +168,9 @@ def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[st
                                 ),
                             }
                         )
-                for row_number, normalized_row in enumerate(normalize_spell_table_rows(table_text)):
+                for row_number, normalized_row in enumerate(
+                    normalize_spell_table_rows(table_text)
+                ):
                     level_match = CLASS_LEVEL_VALUE.search(normalized_row)
                     if level_match is None:
                         continue

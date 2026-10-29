@@ -7,7 +7,6 @@ from extraction.table_extraction import (
     table_class_name,
 )
 
-
 WIZARD_TABLE = """\
 Table 3-18: The Wizard
 Base Attack Bonus Fort Save Ref Save Will Save Special Spells per Day
@@ -22,14 +21,10 @@ Level                         0 1st 2nd 3rd 4th 5th 6th 7th 8th 9th
 def test_spell_table_block_and_rows_preserve_non_spell_columns() -> None:
     table_block = extract_table_blocks(WIZARD_TABLE)[0]
     normalized_row = next(
-        line
-        for line in table_block.splitlines()
-        if line.startswith("Class level 5th;")
+        line for line in table_block.splitlines() if line.startswith("Class level 5th;")
     )
     first_level_row = next(
-        line
-        for line in table_block.splitlines()
-        if line.startswith("Class level 1st;")
+        line for line in table_block.splitlines() if line.startswith("Class level 1st;")
     )
 
     assert "Base Attack Bonus" in table_block
@@ -88,9 +83,7 @@ def test_hyphenated_pdf_line_break_does_not_hide_class_ability() -> None:
 
 
 def test_ranger_casting_requirement_identifies_wisdom() -> None:
-    ranger_rule = (
-        "A Wisdom score of 11 or higher is required to cast any ranger spell."
-    )
+    ranger_rule = "A Wisdom score of 11 or higher is required to cast any ranger spell."
 
     assert infer_class_spellcasting_ability("Ranger", [ranger_rule]) == "wisdom"
 

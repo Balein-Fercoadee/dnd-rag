@@ -212,10 +212,14 @@ normalization.
 ## 5. Run the API
 
 The API is organized by responsibility: `app.py` exposes the FastAPI endpoints,
-the `rag/` package holds the API's RAG modules: `rag_config.py` contains runtime
-settings and parsing patterns, `rag_retrieval.py` handles Ollama embeddings and
-Qdrant retrieval, and `rag_rules.py` contains rule parsing and structured
-answers.
+and the `rag/` package contains the supporting modules. `rag_config.py` holds
+runtime settings and question patterns. `rag_retrieval.py` and `rag_rules.py`
+preserve the existing public imports as small facades. Retrieval is separated
+into `retrieval_backend.py` (Ollama embeddings and the shared Qdrant client),
+`retrieval_tables.py` (structured class and ability rows), and
+`retrieval_pipeline.py` (question-aware retrieval). Rule logic is separated
+into `rule_parsing.py`, `rule_character.py`, `rule_combat.py`, and
+`rule_spells.py`.
 
 For a temporary foreground run:
 
@@ -310,6 +314,18 @@ Install the development test dependencies in the virtual environment:
 cd "$HOME/dnd-rag"
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
+```
+
+Format all Python files in the project with Black:
+
+```bash
+python -m black .
+```
+
+Check formatting without modifying files:
+
+```bash
+python -m black --check .
 ```
 
 Run the offline tests:

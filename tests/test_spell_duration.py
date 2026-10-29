@@ -37,8 +37,7 @@ def test_haste_duration_is_reported_as_one_round_per_level() -> None:
     )
 
     assert answer == (
-        "The duration of Haste is 1 round/level. "
-        f"[{SOURCE}, PDF p. 177]"
+        "The duration of Haste is 1 round/level. " f"[{SOURCE}, PDF p. 177]"
     )
 
 
@@ -48,10 +47,7 @@ def test_haste_duration_is_scaled_to_explicit_caster_level() -> None:
         [HASTE_DESCRIPTION],
     )
 
-    assert answer == (
-        "The duration of Haste is 10 rounds. "
-        f"[{SOURCE}, PDF p. 177]"
-    )
+    assert answer == ("The duration of Haste is 10 rounds. " f"[{SOURCE}, PDF p. 177]")
 
 
 def test_duration_question_with_missing_rule_does_not_guess() -> None:
@@ -81,9 +77,7 @@ def test_api_answers_haste_duration_without_calling_chat_model(
         "/v1/chat/completions",
         json={
             "model": "qwen3:8b",
-            "messages": [
-                {"role": "user", "content": "What is the duration of haste?"}
-            ],
+            "messages": [{"role": "user", "content": "What is the duration of haste?"}],
         },
     )
 
@@ -182,6 +176,5 @@ def test_duration_retrieval_targets_named_spell(
         passages,
     )
     assert answer == (
-        "The duration of Haste is 1 round/level. "
-        f"[{SOURCE}, PDF p. 240]"
+        "The duration of Haste is 1 round/level. " f"[{SOURCE}, PDF p. 240]"
     )

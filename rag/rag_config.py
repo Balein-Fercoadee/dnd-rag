@@ -1,4 +1,5 @@
 """Runtime configuration and parsing patterns for the D&D rules API."""
+
 import os
 import re
 
@@ -43,8 +44,7 @@ SPELL_LEVEL_PATTERN = re.compile(
 
 
 SPELL_SLOT_COUNT_PATTERN = re.compile(
-    r"\b(?P<label>\d+(?:st|nd|rd|th)-level):\s*"
-    r"(?P<count>\d+|unavailable)\b",
+    r"\b(?P<label>\d+(?:st|nd|rd|th)-level):\s*" r"(?P<count>\d+|unavailable)\b",
     re.IGNORECASE,
 )
 

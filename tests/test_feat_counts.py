@@ -175,9 +175,7 @@ def test_feat_count_retrieval_targets_all_three_feat_grants(
     def fake_query_points(**_kwargs: object) -> SimpleNamespace:
         nonlocal query_calls
         query_calls += 1
-        return SimpleNamespace(
-            points=[retrieved_point] if query_calls == 1 else []
-        )
+        return SimpleNamespace(points=[retrieved_point] if query_calls == 1 else [])
 
     embedded_queries: list[str] = []
     monkeypatch.setattr(

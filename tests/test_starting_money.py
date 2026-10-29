@@ -108,8 +108,7 @@ def test_starting_money_does_not_guess_when_the_class_row_is_missing() -> None:
                 "source": SOURCE,
                 "page": 112,
                 "text": (
-                    "Table 7-1: Random Starting Gold\n"
-                    "Barbarian 4d4 × 10 (100 gp)"
+                    "Table 7-1: Random Starting Gold\n" "Barbarian 4d4 × 10 (100 gp)"
                 ),
             }
         ],
@@ -132,9 +131,7 @@ def test_starting_money_retrieval_targets_the_random_starting_gold_table(
     def fake_query_points(**_kwargs: object) -> SimpleNamespace:
         nonlocal query_calls
         query_calls += 1
-        return SimpleNamespace(
-            points=[] if query_calls == 1 else [starting_gold_point]
-        )
+        return SimpleNamespace(points=[] if query_calls == 1 else [starting_gold_point])
 
     monkeypatch.setattr(rag_retrieval, "embed", lambda _text: [0.0])
     monkeypatch.setattr(
@@ -143,9 +140,7 @@ def test_starting_money_retrieval_targets_the_random_starting_gold_table(
         fake_query_points,
     )
 
-    passages = rag_retrieval.retrieve(
-        "What is the starting money for a fighter?"
-    )
+    passages = rag_retrieval.retrieve("What is the starting money for a fighter?")
 
     assert query_calls == 2
     assert len(passages) == 1

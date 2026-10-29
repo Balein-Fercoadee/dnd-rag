@@ -194,8 +194,7 @@ def test_spell_description_prompt_does_not_expand_domain_entries_as_classes(
                 "source": SOURCE,
                 "page": 232,
                 "text": (
-                    "Flame Strike Evocation [Fire] Level: Clr 5, Drd 4, "
-                    "Sun 5, War 5"
+                    "Flame Strike Evocation [Fire] Level: Clr 5, Drd 4, " "Sun 5, War 5"
                 ),
             }
         ],
@@ -461,9 +460,7 @@ def test_retrieve_gets_bonus_rows_for_each_caster_ability(
         ),
     ],
 )
-def test_live_api_spell_question(
-    question: str, expected: tuple[str, ...]
-) -> None:
+def test_live_api_spell_question(question: str, expected: tuple[str, ...]) -> None:
     base_url = os.getenv("RAG_TEST_BASE_URL")
     api_key = os.getenv("RAG_TEST_API_KEY")
     if not base_url or not api_key:

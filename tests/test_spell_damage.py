@@ -137,9 +137,7 @@ def test_max_damage_retrieval_targets_the_named_spell(
         fake_query_points,
     )
 
-    passages = rag_retrieval.retrieve(
-        "What is the max damage that Fireball can do?"
-    )
+    passages = rag_retrieval.retrieve("What is the max damage that Fireball can do?")
 
     assert query_calls == 2
     assert "Fireball spell damage per caster level" in embedded_queries[1]

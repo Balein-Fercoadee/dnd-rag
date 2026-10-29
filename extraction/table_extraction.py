@@ -8,8 +8,7 @@ TABLE_CAPTION = re.compile(
     re.IGNORECASE,
 )
 TABLE_CAPTION_NAME = re.compile(
-    r"^\s*Table\s+\d+\s*[–-]\s*\d+\s*:\s*(?:The\s+)?"
-    r"(?P<name>.*?)(?=\s{2,}|$)",
+    r"^\s*Table\s+\d+\s*[–-]\s*\d+\s*:\s*(?:The\s+)?" r"(?P<name>.*?)(?=\s{2,}|$)",
     re.IGNORECASE,
 )
 CLASS_TABLE_SUFFIX = re.compile(
@@ -25,9 +24,7 @@ CLASS_LEVEL_VALUE = re.compile(
     r"\bClass level (?P<level>\d{1,2})(?:st|nd|rd|th)\b",
     re.IGNORECASE,
 )
-SPELL_LEVEL_TOKEN = re.compile(
-    r"^(?:0(?:th)?|[1-9](?:st|nd|rd|th)?)$", re.IGNORECASE
-)
+SPELL_LEVEL_TOKEN = re.compile(r"^(?:0(?:th)?|[1-9](?:st|nd|rd|th)?)$", re.IGNORECASE)
 SPELL_SLOT_VALUE = re.compile(r"^(?:\d+|—|–|-)$")
 BASE_ATTACK_BONUS_VALUE = re.compile(r"^\+\d+(?:/\+\d+)*$")
 BONUS_SCORE_ROW = re.compile(
@@ -305,9 +302,7 @@ def normalize_spell_table_rows(table_text: str) -> list[str]:
     for end in range(len(lines)):
         start = max(0, end - 2)
         header_lines = [
-            line
-            for line in lines[start : end + 1]
-            if not TABLE_CAPTION.search(line)
+            line for line in lines[start : end + 1] if not TABLE_CAPTION.search(line)
         ]
         header_block = " ".join(header_lines)
         tokens = [
@@ -345,9 +340,11 @@ def normalize_spell_table_rows(table_text: str) -> list[str]:
             label = (
                 "0th"
                 if spell_level.lower() in {"0", "0th"}
-                else spell_level
-                if spell_level[-1].isalpha()
-                else ordinal_number(int(spell_level))
+                else (
+                    spell_level
+                    if spell_level[-1].isalpha()
+                    else ordinal_number(int(spell_level))
+                )
             )
             entries.append(f"{label}-level: {count}")
         original_row_lines = [line.strip()]
@@ -436,8 +433,7 @@ def normalize_bonus_spell_rows(page_text: str) -> list[str]:
 
         slot_tokens = tokens[: len(BONUS_SPELL_LEVELS)]
         if not all(
-            token.isdigit() or token.strip("—–-") == ""
-            for token in slot_tokens
+            token.isdigit() or token.strip("—–-") == "" for token in slot_tokens
         ):
             continue
 

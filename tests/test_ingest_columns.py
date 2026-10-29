@@ -60,9 +60,7 @@ def test_fireball_description_isolated_from_neighboring_spell_damage() -> None:
 
     normalized_columns = [" ".join(column.split()) for column in columns]
     fireball_column = next(
-        column
-        for column in normalized_columns
-        if "Fireball Evocation [Fire]" in column
+        column for column in normalized_columns if "Fireball Evocation [Fire]" in column
     )
 
     assert "maximum 10d6" in fireball_column

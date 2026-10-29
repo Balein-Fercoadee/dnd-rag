@@ -144,7 +144,10 @@ def test_feat_qualification_prompt_compares_prerequisites_with_character(
     assert response.status_code == 200, response.text
     assert "compare each one with the character details" in system_prompts[0]
     assert "requires levels in that specific class" in system_prompts[0]
-    assert "Caster level is distinct from character level and class level" in system_prompts[0]
+    assert (
+        "Caster level is distinct from character level and class level"
+        in system_prompts[0]
+    )
     assert "do not assume unmentioned feats" in system_prompts[0].casefold()
 
 

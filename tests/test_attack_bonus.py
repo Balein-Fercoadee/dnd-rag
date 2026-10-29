@@ -161,7 +161,10 @@ def test_ranged_attack_does_not_use_strength_as_attack_modifier() -> None:
         },
     ]
 
-    assert rag_rules.structured_attack_bonus_answer(
-        "What is the ranged attack bonus of a 5th level fighter with an 18 strength?",
-        passages,
-    ) is None
+    assert (
+        rag_rules.structured_attack_bonus_answer(
+            "What is the ranged attack bonus of a 5th level fighter with an 18 strength?",
+            passages,
+        )
+        is None
+    )

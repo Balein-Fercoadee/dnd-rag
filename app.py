@@ -1,4 +1,5 @@
 """FastAPI application exposing the local D&D rules RAG service."""
+
 import time
 from typing import Any
 
@@ -76,7 +77,9 @@ def health() -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Qdrant is unavailable: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Qdrant is unavailable: {exc}"
+        ) from exc
     return {"status": "ok", "collection": COLLECTION}
 
 
@@ -91,7 +94,9 @@ def models() -> dict[str, Any]:
 @app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
 def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
     if request.stream:
-        raise HTTPException(status_code=400, detail="Streaming responses are not supported")
+        raise HTTPException(
+            status_code=400, detail="Streaming responses are not supported"
+        )
 
     question = next(
         (
@@ -102,7 +107,9 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
         "",
     )
     if not question:
-        raise HTTPException(status_code=400, detail="Request must include a non-empty user message")
+        raise HTTPException(
+            status_code=400, detail="Request must include a non-empty user message"
+        )
 
     passages = retrieve(question)
     structured_answer = feat_class_level_prerequisite_answer(question, passages)
@@ -178,7 +185,8 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             [
                 passage
                 for passage in class_rows
-                if passage["class_name"].casefold() == question_class_level[0].casefold()
+                if passage["class_name"].casefold()
+                == question_class_level[0].casefold()
                 and passage.get("class_level") == question_class_level[1]
             ]
             if question_class_level
@@ -218,10 +226,7 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
                 "character level. If a prerequisite is not established, say which "
                 "detail is missing rather than claiming the character qualifies."
             )
-        system_prompt += (
-            "\n\n"
-            f"Retrieved passages:\n{context}"
-        )
+        system_prompt += "\n\n" f"Retrieved passages:\n{context}"
         try:
             options: dict[str, Any] = {}
             if request.temperature is not None:
@@ -248,7 +253,9 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             prompt_tokens = result.get("prompt_eval_count", 0)
             completion_tokens = result.get("eval_count", 0)
         except (requests.RequestException, KeyError, ValueError) as exc:
-            raise HTTPException(status_code=502, detail=f"Ollama chat request failed: {exc}") from exc
+            raise HTTPException(
+                status_code=502, detail=f"Ollama chat request failed: {exc}"
+            ) from exc
 
     return {
         "id": "dnd-rag-completion",

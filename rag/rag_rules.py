@@ -21,6 +21,7 @@ from .rag_config import (
     FEAT_NAME_IN_QUESTION,
     FEAT_COUNT_QUESTION,
     FEAT_SELECTION_LEVEL_PATTERN,
+    MAXIMUM_SPELL_DAMAGE_QUESTION,
     SPELL_LEVEL_PATTERN,
     SPELL_SLOT_COUNT_PATTERN,
     STARTING_MONEY_QUESTION,
@@ -346,6 +347,79 @@ def spell_slot_count(text: str, spell_level: int) -> int | None:
 
 def citation(passage: dict[str, Any]) -> str:
     return f"[{passage['source']}, PDF p. {passage['page']}]"
+
+
+def spell_name_for_max_damage(question: str) -> str | None:
+    match = re.search(
+        r"\b(?:max(?:imum)?|highest)\s+damage\s+"
+        r"(?:(?:that|of|for)\s+)?"
+        r"(?P<name>[a-z][a-z'’\-]*(?:\s+[a-z][a-z'’\-]*){0,3}?)"
+        r"(?=\s+(?:spell\b|can\b|could\b|does\b|do\b|deal\b|cause\b|"
+        r"inflict\b)|[?.!,]|$)",
+        question,
+        re.IGNORECASE,
+    )
+    return match.group("name").strip() if match is not None else None
+
+
+def structured_spell_maximum_damage_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if MAXIMUM_SPELL_DAMAGE_QUESTION.search(question) is None:
+        return None
+    spell_name = spell_name_for_max_damage(question)
+    if spell_name is None:
+        return None
+
+    damage_cap_pattern = re.compile(
+        r"maximum\s+(?P<maximum>\d+d\d+)\b"
+        r"(?P<tail>(?:(?!\bmaximum\b)[^.]){0,100})",
+        re.IGNORECASE,
+    )
+    spell_entry_pattern = re.compile(
+        rf"\b{re.escape(spell_name)}\s*spell\b",
+        re.IGNORECASE,
+    )
+    candidates: list[tuple[re.Match[str], dict[str, Any]]] = []
+    for passage in passages:
+        text = passage.get("text")
+        if not isinstance(text, str):
+            continue
+        normalized_text = re.sub(r"\s+", " ", text)
+        for spell_entry in spell_entry_pattern.finditer(normalized_text):
+            entry_end = min(spell_entry.end() + 700, len(normalized_text))
+            candidates.extend(
+                (match, passage)
+                for match in damage_cap_pattern.finditer(
+                    normalized_text, spell_entry.end(), entry_end
+                )
+            )
+    associated_candidates = [
+        (match, passage)
+        for match, passage in candidates
+        if re.search(
+            r"\bto\s+(?:every|each|all)\b",
+            match.group("tail"),
+            re.IGNORECASE,
+        )
+    ]
+    if len(associated_candidates) == 1:
+        match, passage = associated_candidates[0]
+        return (
+            f"{spell_name.title()} can deal a maximum of "
+            f"{match.group('maximum')}. {citation(passage)}"
+        )
+    if not associated_candidates and len(candidates) == 1:
+        match, passage = candidates[0]
+        return (
+            f"{spell_name.title()} can deal a maximum of "
+            f"{match.group('maximum')}. {citation(passage)}"
+        )
+
+    return (
+        f"Cannot establish the maximum damage for {spell_name.title()} from "
+        "the retrieved spell description."
+    )
 
 
 def structured_fighter_feat_count_answer(

@@ -155,17 +155,34 @@ Or ingest just one PDF:
 python ingest.py --pdf "pdfs/Player's Handbook.pdf"
 ```
 
-The importer extracts layout-preserving page text, captioned tables, generic
-table rows with caption/header context, normalized class spell-per-day rows,
-and ability-score bonus-spell rows. Generic rows preserve extracted cell text
-without guessing the meaning of columns, while the full table and page text
-remain indexed as context. Table boundaries rely on the PDF's extracted text
-layout; adjacent side-by-side tables or merged cells may remain searchable in
-page text without becoming separate row records. These records are embedded
-with Ollama and upserted into the configured Qdrant collection. Before
-reindexing a PDF, the importer removes previously indexed points with that
-PDF's filename; therefore keep filenames unique across books. Reingesting the
-PDFs after importer changes refreshes their stored metadata and vectors.
+The importer extracts page text in detected column order, captioned tables,
+generic table rows with caption/header context, normalized class spell-per-day
+rows, and ability-score bonus-spell rows. Column-aware page text keeps nearby
+rules in separate columns from being merged into one passage.
+
+### PDF layout and retrieval lessons
+
+The Player's Handbook spell pages use **three columns**. Do not assume a PDF
+uses only two: the importer detects vertical whitespace gutters and extracts
+each detected column separately, preserving their reading order. If no clear
+gutters are detected, it falls back to extracting the page as a whole. This
+prevents text from neighboring spells (for example, their different damage
+caps) from being combined into one retrieval passage. When a result looks
+wrong, use `--preview-page` on the source page to check what the PDF extractor
+actually produced before changing answer logic.
+
+Page text and table extraction serve different purposes. Page text is
+column-aware, but table detection still uses the full-page extracted layout;
+adjacent side-by-side tables or merged cells may therefore remain searchable
+in page text without becoming separate row records. Generic table rows preserve
+extracted cell text without guessing column meanings, while full table and page
+text remain indexed as context.
+
+The extracted records are embedded with Ollama and upserted into the configured
+Qdrant collection. Before reindexing a PDF, the importer removes previously
+indexed points with that PDF's filename; therefore keep filenames unique across
+books. Changes to extraction or chunking only affect the index after reingesting
+the PDFs. Changes limited to API answer logic do not require reingestion.
 
 Class tables are indexed both as complete captioned table blocks and as
 individual normalized spell rows. Each normalized row also carries its

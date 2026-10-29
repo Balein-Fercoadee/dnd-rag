@@ -95,6 +95,12 @@ FEAT_COUNT_QUESTION = re.compile(
 )
 
 
+MAXIMUM_SPELL_DAMAGE_QUESTION = re.compile(
+    r"\b(?:max(?:imum)?|highest)\s+damage\b",
+    re.IGNORECASE,
+)
+
+
 BASE_ATTACK_BONUS_VALUE_PATTERN = re.compile(
     r"\bbase attack bonus:\s*\+(?P<value>\d+)\b",
     re.IGNORECASE,

@@ -1,4 +1,7 @@
 import re
+from typing import Any
+
+from pdfplumber.page import Page
 
 TABLE_CAPTION = re.compile(
     r"^\s*Table\s+\d+\s*[–-]\s*\d+\s*:",
@@ -43,6 +46,63 @@ BONUS_SPELL_LEVELS = (
     "8th-level",
     "9th-level",
 )
+
+
+def page_column_boundaries(
+    words: list[dict[str, Any]], page_width: float, page_height: float
+) -> list[float]:
+    """Find persistent vertical gutters separating page-text columns."""
+    occupancy = [False] * int(page_width + 1)
+    for word in words:
+        if not (
+            35 < word["top"] < page_height - 35
+            and word["x1"] - word["x0"] < page_width * 0.2
+        ):
+            continue
+        left = max(0, int(word["x0"]))
+        right = min(len(occupancy), int(word["x1"]) + 1)
+        for x in range(left, right):
+            occupancy[x] = True
+
+    gaps = []
+    gap_start = None
+    for x, occupied in enumerate(occupancy):
+        if not occupied and gap_start is None:
+            gap_start = x
+        elif occupied and gap_start is not None:
+            if (
+                x - gap_start >= max(8, int(page_width * 0.015))
+                and gap_start > page_width * 0.12
+                and x < page_width * 0.88
+            ):
+                gaps.append((gap_start, x))
+            gap_start = None
+
+    boundaries = [0.0, *((left + right) / 2 for left, right in gaps), page_width]
+    minimum_words = max(20, int(len(words) * 0.05))
+    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
+        column_words = sum(
+            left <= (word["x0"] + word["x1"]) / 2 < right for word in words
+        )
+        if column_words < minimum_words:
+            return [0.0, page_width]
+    return boundaries
+
+
+def extract_page_text_columns(page: Page) -> list[str]:
+    """Extract page text in column order instead of interleaving columns."""
+    words = page.extract_words()
+    boundaries = page_column_boundaries(words, page.width, page.height)
+    if len(boundaries) == 2:
+        text = page.extract_text(layout=True) or ""
+        return [text] if text else []
+
+    columns = []
+    for left, right in zip(boundaries[:-1], boundaries[1:], strict=True):
+        text = page.crop((left, 0, right, page.height)).extract_text() or ""
+        if text.strip():
+            columns.append(text)
+    return columns
 
 
 def extract_table_blocks(text: str) -> list[str]:

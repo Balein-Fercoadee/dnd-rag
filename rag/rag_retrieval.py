@@ -18,6 +18,7 @@ from .rag_config import (
     EMBED_MODEL,
     FEAT_QUALIFICATION_QUESTION,
     FEAT_COUNT_QUESTION,
+    MAXIMUM_SPELL_DAMAGE_QUESTION,
     OLLAMA_URL,
     QDRANT_URL,
     RETRIEVAL_LIMIT,
@@ -31,6 +32,7 @@ from .rag_rules import (
     consistent_class_ability,
     feat_name_from_question,
     requested_class_levels,
+    spell_name_for_max_damage,
 )
 
 qdrant = QdrantClient(url=QDRANT_URL)
@@ -323,6 +325,24 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                         offset=next_offset,
                         with_payload=True,
                     )
+
+        if MAXIMUM_SPELL_DAMAGE_QUESTION.search(question):
+            spell_name = spell_name_for_max_damage(question)
+            if spell_name is not None:
+                spell_damage_rules = qdrant.query_points(
+                    collection_name=COLLECTION,
+                    query=embed(
+                        f"D&D 3.5 {spell_name} spell damage per caster level "
+                        "maximum damage cap"
+                    ),
+                    limit=RETRIEVAL_LIMIT,
+                    with_payload=True,
+                )
+                seen_ids = {point.id for point in points}
+                for point in spell_damage_rules.points:
+                    if point.id not in seen_ids:
+                        points.append(point)
+                        seen_ids.add(point.id)
 
         has_spell_question = "spell" in question.lower()
         has_armor_class_question = ARMOR_CLASS_QUESTION.search(question) is not None

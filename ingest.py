@@ -11,6 +11,7 @@ from extraction.table_extraction import (
     CLASS_LEVEL_VALUE,
     extract_table_blocks,
     extract_table_data_rows,
+    extract_page_text_columns,
     infer_class_spellcasting_ability,
     normalize_bonus_spell_rows,
     normalize_class_progression_rows,
@@ -89,16 +90,19 @@ def collect_pdf(pdf_path: Path, preview_page: int | None = None) -> list[dict[st
             if preview_page is not None and page_number != preview_page:
                 continue
 
-            for chunk_number, chunk in enumerate(split_page_text(page_text)):
-                records.append(
-                    {
-                        "source": pdf_path.name,
-                        "page": page_number,
-                        "kind": "page_text",
-                        "ordinal": chunk_number,
-                        "text": chunk,
-                    }
-                )
+            chunk_number = 0
+            for column_text in extract_page_text_columns(pdf.pages[page_number - 1]):
+                for chunk in split_page_text(column_text):
+                    records.append(
+                        {
+                            "source": pdf_path.name,
+                            "page": page_number,
+                            "kind": "page_text",
+                            "ordinal": chunk_number,
+                            "text": chunk,
+                        }
+                    )
+                    chunk_number += 1
 
             for table_number, table_text in enumerate(
                 extract_table_blocks(page_text), start=1

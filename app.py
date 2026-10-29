@@ -23,6 +23,8 @@ from rag.rag_rules import (
     structured_attack_bonus_answer,
     structured_base_attack_bonus_answer,
     structured_base_saves_answer,
+    structured_fighter_feat_count_answer,
+    structured_starting_money_answer,
     structured_spell_slot_answer,
 )
 
@@ -102,6 +104,10 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
 
     passages = retrieve(question)
     structured_answer = feat_class_level_prerequisite_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_fighter_feat_count_answer(question, passages)
+    if structured_answer is None:
+        structured_answer = structured_starting_money_answer(question, passages)
     if structured_answer is None:
         structured_answer = structured_base_armor_class_answer(question, passages)
     if structured_answer is None:

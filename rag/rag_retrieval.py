@@ -1,4 +1,5 @@
 """Ollama embedding and Qdrant passage retrieval."""
+import re
 from typing import Any
 
 import requests
@@ -16,10 +17,12 @@ from .rag_config import (
     COLLECTION,
     EMBED_MODEL,
     FEAT_QUALIFICATION_QUESTION,
+    FEAT_COUNT_QUESTION,
     OLLAMA_URL,
     QDRANT_URL,
     RETRIEVAL_LIMIT,
     BONUS_ROW_LIMIT,
+    STARTING_MONEY_QUESTION,
 )
 from .rag_rules import (
     bonus_score_range,
@@ -252,11 +255,99 @@ def retrieve(question: str) -> list[dict[str, Any]]:
                     seen_ids.add(point.id)
             points = prioritized_points
 
+        if FEAT_COUNT_QUESTION.search(question):
+            feat_count_rules = qdrant.query_points(
+                collection_name=COLLECTION,
+                query=embed(
+                    "D&D 3.5 Fighter bonus feats at 1st level and every two "
+                    "fighter levels thereafter, plus the feat every three "
+                    "character levels and the human bonus feat"
+                ),
+                limit=RETRIEVAL_LIMIT,
+                with_payload=True,
+            )
+            seen_ids = {point.id for point in points}
+            for point in feat_count_rules.points:
+                if point.id not in seen_ids:
+                    points.append(point)
+                    seen_ids.add(point.id)
+
+            fighter_rule_pages = {
+                (payload["source"], payload["page"])
+                for point in points
+                if isinstance(payload := (point.payload or {}), dict)
+                and payload.get("kind") == "page_text"
+                and isinstance(payload.get("source"), str)
+                and isinstance(payload.get("page"), int)
+                and re.search(
+                    r"\bfighter\b.{0,80}\bbonus feats?\b|"
+                    r"\bbonus feats?\b.{0,80}\bfighter\b",
+                    str(payload.get("text", "")),
+                    re.IGNORECASE | re.DOTALL,
+                )
+            }
+            for source, page in fighter_rule_pages:
+                page_filter = qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="source",
+                            match=qdrant_models.MatchValue(value=source),
+                        ),
+                        qdrant_models.FieldCondition(
+                            key="page",
+                            match=qdrant_models.MatchValue(value=page),
+                        ),
+                        qdrant_models.FieldCondition(
+                            key="kind",
+                            match=qdrant_models.MatchValue(value="page_text"),
+                        ),
+                    ]
+                )
+                page_points, next_offset = qdrant.scroll(
+                    collection_name=COLLECTION,
+                    scroll_filter=page_filter,
+                    limit=256,
+                    with_payload=True,
+                )
+                while True:
+                    for point in page_points:
+                        if point.id not in seen_ids:
+                            points.append(point)
+                            seen_ids.add(point.id)
+                    if next_offset is None:
+                        break
+                    page_points, next_offset = qdrant.scroll(
+                        collection_name=COLLECTION,
+                        scroll_filter=page_filter,
+                        limit=256,
+                        offset=next_offset,
+                        with_payload=True,
+                    )
+
         has_spell_question = "spell" in question.lower()
         has_armor_class_question = ARMOR_CLASS_QUESTION.search(question) is not None
         has_bab_question = BASE_ATTACK_BONUS_QUESTION.search(question) is not None
         has_attack_bonus_question = ATTACK_BONUS_QUESTION.search(question) is not None
         has_base_save_question = BASE_SAVE_QUESTION.search(question) is not None
+        has_starting_money_question = (
+            STARTING_MONEY_QUESTION.search(question) is not None
+        )
+        if has_starting_money_question:
+            starting_money_rules = qdrant.query_points(
+                collection_name=COLLECTION,
+                query=embed(
+                    f"{question} D&D 3.5 Random Starting Gold table "
+                    "class starting gold dice roll"
+                ),
+                limit=RETRIEVAL_LIMIT,
+                with_payload=True,
+            )
+            seen_ids = {point.id for point in points}
+            for point in starting_money_rules.points:
+                if point.id not in seen_ids:
+                    points.append(point)
+                    seen_ids.add(point.id)
+
         if has_armor_class_question:
             armor_class_rules = qdrant.query_points(
                 collection_name=COLLECTION,

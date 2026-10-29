@@ -19,10 +19,27 @@ from .rag_config import (
     CLASS_TABLE_NAME_PATTERN,
     FEAT_QUALIFICATION_QUESTION,
     FEAT_NAME_IN_QUESTION,
+    FEAT_COUNT_QUESTION,
     FEAT_SELECTION_LEVEL_PATTERN,
     SPELL_LEVEL_PATTERN,
     SPELL_SLOT_COUNT_PATTERN,
+    STARTING_MONEY_QUESTION,
 )
+
+CORE_CLASSES = (
+    "Barbarian",
+    "Bard",
+    "Cleric",
+    "Druid",
+    "Fighter",
+    "Monk",
+    "Paladin",
+    "Ranger",
+    "Rogue",
+    "Sorcerer",
+    "Wizard",
+)
+
 
 def bonus_score_range(ability_score: int) -> tuple[int, int]:
     if ability_score < 1 or ability_score > 99:
@@ -329,6 +346,203 @@ def spell_slot_count(text: str, spell_level: int) -> int | None:
 
 def citation(passage: dict[str, Any]) -> str:
     return f"[{passage['source']}, PDF p. {passage['page']}]"
+
+
+def structured_fighter_feat_count_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if FEAT_COUNT_QUESTION.search(question) is None:
+        return None
+
+    level_patterns = (
+        re.compile(
+            r"\b(?P<level>\d{1,2})(?:st|nd|rd|th)?[\s-]+level\s+"
+            r"(?:[a-z][a-z-]*\s+)?fighter\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:[a-z][a-z-]*\s+)?fighter\s+(?:at\s+)?(?:class\s+)?level\s+"
+            r"(?P<level>\d{1,2})(?:st|nd|rd|th)?\b",
+            re.IGNORECASE,
+        ),
+    )
+    level_match = next(
+        (match for pattern in level_patterns if (match := pattern.search(question))),
+        None,
+    )
+    if level_match is None:
+        return None
+
+    fighter_level = int(level_match.group("level"))
+    if fighter_level < 1:
+        return None
+    is_human = re.search(r"\bhuman\b", question, re.IGNORECASE) is not None
+
+    passages_by_source: dict[str, list[dict[str, Any]]] = {}
+    for passage in passages:
+        source = passage.get("source")
+        if isinstance(source, str) and isinstance(passage.get("text"), str):
+            passages_by_source.setdefault(source, []).append(passage)
+
+    for source, source_passages in passages_by_source.items():
+        compact_text = re.sub(
+            r"\s+",
+            " ",
+            " ".join(str(passage["text"]) for passage in source_passages),
+        )
+        has_first_level_fighter_feat = re.search(
+            r"\bAt 1st level, a fighter gets a bonus\b", compact_text, re.IGNORECASE
+        )
+        has_fighter_progression = re.search(
+            r"\bevery two fighter\b", compact_text, re.IGNORECASE
+        ) and re.search(
+            r"\blevels thereafter\b", compact_text, re.IGNORECASE
+        )
+        has_general_progression = re.search(
+            r"\bgets every three levels\b", compact_text, re.IGNORECASE
+        )
+        has_first_character_feat = re.search(
+            r"\bany 1st-level character gets\b",
+            compact_text,
+            re.IGNORECASE,
+        )
+        has_human_bonus = re.search(
+            r"\bbonus\b.{0,300}\bgranted to a human character\b",
+            compact_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not all(
+            (
+                has_first_level_fighter_feat,
+                has_fighter_progression,
+                has_general_progression,
+                has_first_character_feat,
+            )
+        ):
+            continue
+        if is_human and has_human_bonus is None:
+            continue
+
+        character_level_feats = 1 + fighter_level // 3
+        fighter_bonus_feats = 1 + fighter_level // 2
+        human_bonus_feats = int(is_human)
+        total_feats = (
+            character_level_feats + fighter_bonus_feats + human_bonus_feats
+        )
+        breakdown = (
+            f"{character_level_feats} character-level "
+            f"{'feat' if character_level_feats == 1 else 'feats'}, "
+            f"{fighter_bonus_feats} Fighter bonus "
+            f"{'feat' if fighter_bonus_feats == 1 else 'feats'}"
+        )
+        if is_human:
+            breakdown += ", and 1 Human bonus feat"
+        evidence_patterns = (
+            r"\bAt 1st level, a fighter gets a bonus",
+            r"\bevery two fighter\b",
+            r"\bgets every three levels\b",
+            r"\bany 1st-level character gets\b",
+            r"\bgranted to a human character\b",
+        )
+        pages = list(
+            dict.fromkeys(
+                str(passage["page"])
+                for passage in source_passages
+                if passage.get("page") is not None
+                and any(
+                    re.search(pattern, str(passage["text"]), re.IGNORECASE)
+                    for pattern in evidence_patterns
+                )
+            )
+        )
+        page_citation = (
+            f"[{source}, PDF p. {pages[0]}]"
+            if len(pages) == 1
+            else f"[{source}, PDF pp. {', '.join(pages)}]"
+        )
+        return (
+            f"A {fighter_level}{ordinal_suffix(fighter_level)}-level "
+            f"{'human ' if is_human else ''}Fighter gets {total_feats} feats: "
+            f"{breakdown}. {page_citation}"
+        )
+
+    return (
+        "Cannot establish the total feat count because the retrieved passages "
+        "do not show the character-level and Fighter bonus-feat progressions"
+        + (" and the Human bonus feat." if is_human else ".")
+    )
+
+
+def structured_starting_money_answer(
+    question: str, passages: list[dict[str, Any]]
+) -> str | None:
+    if STARTING_MONEY_QUESTION.search(question) is None:
+        return None
+
+    requested_classes = [
+        class_name
+        for class_name in CORE_CLASSES
+        if re.search(rf"\b{class_name}\b", question, re.IGNORECASE)
+    ]
+    if len(requested_classes) != 1:
+        return None
+    requested_class = requested_classes[0]
+    class_row_pattern = re.compile(
+        rf"\b{re.escape(requested_class)}\b[^\d\n]{{0,40}}"
+        r"(?P<count>\d+)\s*d\s*(?P<sides>\d+)"
+        r"(?:\s*[x×]\s*(?P<multiplier>\d+)\b)?",
+        re.IGNORECASE,
+    )
+
+    for passage in passages:
+        text = passage.get("text")
+        if not isinstance(text, str) or re.search(
+            r"\bstarting\s+(?:gold|money)\b", text, re.IGNORECASE
+        ) is None:
+            continue
+        match = class_row_pattern.search(text)
+        if match is None:
+            continue
+
+        count = int(match.group("count"))
+        sides = int(match.group("sides"))
+        multiplier_match = match.group("multiplier")
+        if multiplier_match is None:
+            average_match = re.match(
+                r"\s*\((?P<gp>\d+)\s*gp"
+                r"(?:\s*,\s*(?P<sp>\d+)\s*sp)?\)",
+                text[match.end() :],
+                re.IGNORECASE,
+            )
+            if average_match is None:
+                continue
+            printed_average = int(average_match.group("gp")) + (
+                int(average_match.group("sp") or 0) / 10
+            )
+            base_average = count * (sides + 1) / 2
+            inferred_multiplier = printed_average / base_average
+            if not inferred_multiplier.is_integer():
+                continue
+            multiplier = int(inferred_multiplier)
+        else:
+            multiplier = int(multiplier_match)
+
+        minimum = count * multiplier
+        maximum = count * sides * multiplier
+        average = count * (sides + 1) * multiplier / 2
+        dice_expression = f"{count}d{sides}"
+        if multiplier != 1:
+            dice_expression += f" × {multiplier}"
+        return (
+            f"{requested_class} starting money is {dice_expression} gp: "
+            f"{minimum}–{maximum} gp "
+            f"(average {average:g} gp). {citation(passage)}"
+        )
+
+    return (
+        f"Cannot establish the starting money for a {requested_class}; "
+        "the matching starting-gold table row was not retrieved."
+    )
 
 
 def structured_base_armor_class_answer(

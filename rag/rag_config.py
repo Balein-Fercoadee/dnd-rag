@@ -82,6 +82,19 @@ ARMOR_CLASS_QUESTION = re.compile(
 )
 
 
+STARTING_MONEY_QUESTION = re.compile(
+    r"\b(?:starting\s+(?:money|gold|wealth)|"
+    r"(?:how much|what)\s+(?:starting\s+)?(?:money|gold))\b",
+    re.IGNORECASE,
+)
+
+
+FEAT_COUNT_QUESTION = re.compile(
+    r"\b(?:how many|number of|total number of)\s+feats?\b",
+    re.IGNORECASE,
+)
+
+
 BASE_ATTACK_BONUS_VALUE_PATTERN = re.compile(
     r"\bbase attack bonus:\s*\+(?P<value>\d+)\b",
     re.IGNORECASE,

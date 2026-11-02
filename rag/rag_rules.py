@@ -45,6 +45,7 @@ from .rule_parsing import (
 
 from .rule_character import (
     feat_class_level_prerequisite_answer,
+    structured_feat_count_answer,
     structured_fighter_feat_count_answer,
     structured_starting_money_answer,
     CORE_CLASSES,
@@ -107,6 +108,7 @@ __all__ = [
     "structured_base_armor_class_answer",
     "structured_base_attack_bonus_answer",
     "structured_base_saves_answer",
+    "structured_feat_count_answer",
     "structured_fighter_feat_count_answer",
     "structured_spell_duration_answer",
     "structured_spell_maximum_damage_answer",

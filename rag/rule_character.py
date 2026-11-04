@@ -195,6 +195,88 @@ def feat_class_level_prerequisite_answer(
     return None
 
 
+def _multiclass_feat_count_answer(
+    class_levels: list[tuple[str, int]],
+    passages: list[dict[str, Any]],
+    *,
+    is_human: bool,
+) -> str | None:
+    if is_human and not any(
+        isinstance(passage.get("text"), str)
+        and re.search(
+            r"\b1 extra feat at 1st level\b|"
+            r"\bhuman.{0,160}\b(?:one|1)\s+(?:extra|bonus) feat\b|"
+            r"\b(?:extra|bonus) feat.{0,100}\bhuman\b",
+            passage["text"],
+            re.IGNORECASE | re.DOTALL,
+        )
+        for passage in passages
+    ):
+        return None
+
+    class_bonus_counts: list[tuple[str, int]] = []
+    citations_by_source: dict[str, list[str]] = {}
+    for class_name, class_level in class_levels:
+        single_class_question = (
+            f"How many feats does a {class_level}{ordinal_suffix(class_level)} "
+            f"level {class_name} get?"
+        )
+        answer = structured_feat_count_answer(single_class_question, passages)
+        if answer is None:
+            return None
+
+        bonus_match = re.search(
+            rf",\s*(?P<count>\d+)\s+{re.escape(class_name)} bonus feats?\b",
+            answer,
+            re.IGNORECASE,
+        )
+        if bonus_match is None:
+            return None
+        class_bonus_counts.append((class_name, int(bonus_match.group("count"))))
+
+        citation_match = re.search(
+            r"\[(?P<source>.*?), PDF pp?\. (?P<pages>[\d, ]+)\]",
+            answer,
+        )
+        if citation_match is None:
+            return None
+        pages = citations_by_source.setdefault(citation_match.group("source"), [])
+        pages.extend(
+            page.strip()
+            for page in citation_match.group("pages").split(",")
+            if page.strip() not in pages
+        )
+
+    character_level = sum(level for _, level in class_levels)
+    character_level_feats = 1 + character_level // 3
+    human_bonus_feats = int(is_human)
+    total_feats = (
+        character_level_feats
+        + sum(count for _, count in class_bonus_counts)
+        + human_bonus_feats
+    )
+    breakdown = [
+        f"{character_level_feats} character-level "
+        f"{'feat' if character_level_feats == 1 else 'feats'}"
+    ]
+    breakdown.extend(
+        f"{count} {class_name} bonus {'feat' if count == 1 else 'feats'}"
+        for class_name, count in class_bonus_counts
+    )
+    if is_human:
+        breakdown.append("1 Human bonus feat")
+    citation_text = " ".join(
+        f"[{source}, PDF pp. {', '.join(pages)}]"
+        for source, pages in citations_by_source.items()
+    )
+    return (
+        f"A {character_level}{ordinal_suffix(character_level)}-level "
+        f"{'human ' if is_human else ''}multiclass character gets "
+        f"{total_feats} feats: {', '.join(breakdown[:-1])}, and "
+        f"{breakdown[-1]}. {citation_text}"
+    )
+
+
 def structured_feat_count_answer(
     question: str, passages: list[dict[str, Any]]
 ) -> str | None:
@@ -206,8 +288,47 @@ def structured_feat_count_answer(
         for class_name in CORE_CLASSES
         if re.search(rf"\b{re.escape(class_name)}\b", question, re.IGNORECASE)
     ]
-    if len(requested_classes) != 1:
+    if not requested_classes:
         return None
+    if len(requested_classes) > 1:
+        class_level_matches: list[tuple[int, str, int]] = []
+        for class_name in requested_classes:
+            class_pattern = re.escape(class_name)
+            patterns = (
+                re.compile(
+                    r"\b(?P<level>\d{1,2})(?:st|nd|rd|th)?[\s-]+level\s+"
+                    rf"(?:[a-z][a-z-]*\s+)?{class_pattern}\b",
+                    re.IGNORECASE,
+                ),
+                re.compile(
+                    rf"\b{class_pattern}\s+(?:at\s+)?(?:class\s+)?level\s+"
+                    r"(?P<level>\d{1,2})(?:st|nd|rd|th)?\b",
+                    re.IGNORECASE,
+                ),
+            )
+            match = next(
+                (match for pattern in patterns if (match := pattern.search(question))),
+                None,
+            )
+            if match is not None:
+                class_level_matches.append(
+                    (match.start(), class_name, int(match.group("level")))
+                )
+        class_levels = [
+            (class_name, level) for _, class_name, level in sorted(class_level_matches)
+        ]
+        if (
+            len(class_levels) != len(requested_classes)
+            or len({class_name for class_name, _ in class_levels}) != len(class_levels)
+            or any(level < 1 for _, level in class_levels)
+        ):
+            return None
+        is_human = re.search(r"\bhuman\b", question, re.IGNORECASE) is not None
+        return _multiclass_feat_count_answer(
+            class_levels,
+            passages,
+            is_human=is_human,
+        )
     class_name = requested_classes[0]
     class_pattern = re.escape(class_name)
     level_patterns = (
@@ -247,30 +368,53 @@ def structured_feat_count_answer(
             " ",
             " ".join(str(passage["text"]) for passage in source_passages),
         )
-        has_general_progression = re.search(
-            r"\bgets every three levels\b|"
-            r"\bfeats?\b.{0,80}\bevery three levels\b|"
-            r"\bevery three levels\b.{0,80}\bfeats?\b|"
-            r"\bfeats?\b.{0,80}\bevery third (?:character )?level\b|"
-            r"\bevery third (?:character )?level\b.{0,80}\bfeats?\b",
+        character_feat_table = re.search(
+            r"\bTable 3[–-]2: Experience and Level-Dependent Benefits\b"
+            r".{0,1200}\bFeats\b",
             compact_text,
             re.IGNORECASE,
         )
-        has_first_character_feat = re.search(
-            r"\bany 1st-level character gets\b|"
-            r"\bcharacters? (?:get|gets|gain|gains|receive|receives) "
-            r"(?:one|a) feat at 1st level\b",
-            compact_text,
-            re.IGNORECASE,
+        has_character_feat_table = (
+            character_feat_table is not None
+            and re.search(
+                rf"\b{class_level}{ordinal_suffix(class_level)}\b",
+                compact_text,
+                re.IGNORECASE,
+            )
+            is not None
+        )
+        has_general_progression = (
+            re.search(
+                r"\bgets every three levels\b|"
+                r"\bfeats?\b.{0,80}\bevery three levels\b|"
+                r"\bevery three levels\b.{0,80}\bfeats?\b|"
+                r"\bfeats?\b.{0,80}\bevery third (?:character )?level\b|"
+                r"\bevery third (?:character )?level\b.{0,80}\bfeats?\b",
+                compact_text,
+                re.IGNORECASE,
+            )
+            is not None
+            or has_character_feat_table
+        )
+        has_first_character_feat = (
+            re.search(
+                r"\bany 1st-level character gets\b|"
+                r"\bcharacters? (?:get|gets|gain|gains|receive|receives) "
+                r"(?:one|a) feat at 1st level\b",
+                compact_text,
+                re.IGNORECASE,
+            )
+            is not None
+            or has_character_feat_table
         )
         has_human_bonus = re.search(
             r"\bbonus\b.{0,300}\bgranted to a human character\b|"
-            r"\bhuman.{0,100}\b(?:one )?(?:extra|bonus) feat\b|"
+            r"\b1 extra feat at 1st level\b|"
+            r"\bhuman.{0,160}\b(?:one|1)\s+(?:extra|bonus) feat\b|"
             r"\b(?:extra|bonus) feat.{0,100}\bhuman\b",
             compact_text,
             re.IGNORECASE | re.DOTALL,
         )
-
         class_level_patterns = (
             re.compile(
                 rf"\bat\s+(?P<level>\d{{1,2}})(?:st|nd|rd|th)?[\s-]+level\b"
@@ -302,6 +446,44 @@ def structured_feat_count_answer(
             for sentence in class_rule_sentences
             for match in pattern.finditer(sentence)
         }
+        wizard_table_levels: set[int] = set()
+        if class_name == "Wizard":
+            wizard_row_pattern = re.compile(
+                r"\b(?P<level>\d{1,2})(?:st|nd|rd|th)\b"
+                r"(?P<row>(?:(?!\b\d{1,2}(?:st|nd|rd|th)\b).){0,300})",
+                re.IGNORECASE | re.DOTALL,
+            )
+            for passage in source_passages:
+                passage_text = str(passage["text"])
+                table_match = re.search(
+                    r"\bTable 3[–-]18: The Wizard\b",
+                    passage_text,
+                    re.IGNORECASE,
+                )
+                if table_match is None:
+                    continue
+                table_text = passage_text[table_match.start() :]
+                wizard_table_levels.update(
+                    int(match.group("level"))
+                    for match in wizard_row_pattern.finditer(table_text)
+                    if re.search(
+                        r"\bScribe Scroll\b|\bBonus feat\b",
+                        match.group("row"),
+                        re.IGNORECASE,
+                    )
+                )
+            class_grant_levels.update(wizard_table_levels)
+        has_wizard_class_table = (
+            class_name == "Wizard"
+            and bool(wizard_table_levels)
+            and {
+                1,
+                5,
+                10,
+                15,
+                20,
+            }.issubset(wizard_table_levels)
+        )
 
         number_words = {
             "one": 1,
@@ -338,11 +520,14 @@ def structured_feat_count_answer(
             class_bonus_levels.update(
                 range(class_interval, class_level + 1, class_interval)
             )
+        class_progression_evidence = (
+            class_interval is not None or has_wizard_class_table
+        )
 
         if not all(
             (
                 class_bonus_levels,
-                class_interval,
+                class_progression_evidence,
                 has_general_progression,
                 has_first_character_feat,
             )
@@ -368,6 +553,7 @@ def structured_feat_count_answer(
         evidence_patterns = (
             *(pattern.pattern for pattern in class_level_patterns),
             interval_pattern.pattern,
+            r"\bTable 3[–-]18: The Wizard\b",
             r"\bgets every three levels\b",
             r"\bfeats?\b.{0,80}\bevery three levels\b",
             r"\bevery three levels\b.{0,80}\bfeats?\b",
@@ -377,8 +563,12 @@ def structured_feat_count_answer(
             r"\bcharacters? (?:get|gets|gain|gains|receive|receives) "
             r"(?:one|a) feat at 1st level\b",
             r"\bgranted to a human character\b",
+            r"\b1 extra feat at 1st level\b",
             r"\bhuman.{0,100}\b(?:one )?(?:extra|bonus) feat\b",
+            r"\bhuman.{0,160}\b(?:one|1)\s+(?:extra|bonus) feat\b",
             r"\b(?:extra|bonus) feat.{0,100}\bhuman\b",
+            r"\bTable 3[–-]2: Experience and Level-Dependent Benefits\b"
+            r".{0,1200}\bFeats\b",
         )
         pages = list(
             dict.fromkeys(

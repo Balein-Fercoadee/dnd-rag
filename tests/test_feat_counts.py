@@ -145,6 +145,158 @@ def test_ninth_level_human_wizard_counts_general_class_and_human_feats(
     assert f"{SOURCE}, PDF pp. 57, 90, 12" in answer
 
 
+def test_multiclass_human_wizard_fighter_counts_each_progression() -> None:
+    answer = rag_rules.structured_feat_count_answer(
+        "How many feats does a human, 5th level wizard/4th level fighter get?",
+        [
+            {
+                **WIZARD_FEAT_RULES[0],
+                "page": 56,
+                "text": (
+                    "Table 3-18: The Wizard. 1st Summon familiar, Scribe Scroll; "
+                    "5th Bonus feat; 10th Bonus feat; 15th Bonus feat; "
+                    "20th Bonus feat."
+                ),
+            },
+            FIGHTER_FEAT_RULES,
+            WIZARD_FEAT_RULES[1],
+            WIZARD_FEAT_RULES[2],
+        ],
+    )
+
+    assert answer is not None
+    assert "gets 10 feats" in answer
+    assert "4 character-level feats" in answer
+    assert "2 Wizard bonus feats" in answer
+    assert "3 Fighter bonus feats" in answer
+    assert "1 Human bonus feat" in answer
+
+
+def test_multiclass_feat_retrieval_targets_each_class_progression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wizard_levels = (1, 5, 10, 15, 20)
+    wizard_points = [
+        SimpleNamespace(
+            id=f"wizard-level-{level}",
+            payload={
+                "kind": "class_progression_row",
+                "source": SOURCE,
+                "page": 56,
+                "text": (
+                    "Table 3–18: The Wizard. Wizard class level "
+                    f"{level}; Original table row: {level}{'st' if level == 1 else 'th'} "
+                    f"{'Scribe Scroll' if level == 1 else 'Bonus feat'}."
+                ),
+            },
+            score=1.0,
+        )
+        for level in wizard_levels
+    ]
+    fighter_point = SimpleNamespace(
+        id="fighter-feat-rules",
+        payload=FIGHTER_FEAT_RULES,
+        score=1.0,
+    )
+    general_point = SimpleNamespace(
+        id="character-feat-rules",
+        payload=WIZARD_FEAT_RULES[1],
+        score=1.0,
+    )
+    human_point = SimpleNamespace(
+        id="human-feat-rules",
+        payload=WIZARD_FEAT_RULES[2],
+        score=1.0,
+    )
+    query_calls = 0
+
+    def fake_query_points(**_kwargs: object) -> SimpleNamespace:
+        nonlocal query_calls
+        query_calls += 1
+        results = {
+            1: [],
+            2: [wizard_points[1]],
+            3: [fighter_point],
+            4: [general_point],
+            5: [human_point],
+        }
+        return SimpleNamespace(points=results.get(query_calls, []))
+
+    embedded_queries: list[str] = []
+    monkeypatch.setattr(
+        rag_retrieval,
+        "embed",
+        lambda query: embedded_queries.append(query) or [0.0],
+    )
+    monkeypatch.setattr(
+        rag_retrieval.qdrant,
+        "query_points",
+        fake_query_points,
+    )
+    monkeypatch.setattr(
+        rag_retrieval.qdrant,
+        "scroll",
+        lambda **_kwargs: ([*wizard_points, fighter_point], None),
+    )
+
+    passages = rag_retrieval.retrieve(
+        "How many feats does a human, 5th level wizard/4th level fighter get?"
+    )
+    answer = rag_rules.structured_feat_count_answer(
+        "How many feats does a human, 5th level wizard/4th level fighter get?",
+        passages,
+    )
+
+    assert len(embedded_queries) == 5
+    assert any("Wizard Scribe Scroll" in query for query in embedded_queries)
+    assert any("Fighter bonus feats" in query for query in embedded_queries)
+    assert any("every three character levels" in query for query in embedded_queries)
+    assert any("human race one extra feat" in query for query in embedded_queries)
+    assert answer is not None
+    assert "gets 10 feats" in answer
+
+
+def test_ninth_level_human_wizard_counts_from_extracted_table_wording() -> None:
+    answer = rag_rules.structured_feat_count_answer(
+        "How many feats does a 9th level human wizard get?",
+        [
+            {
+                "source": SOURCE,
+                "page": 56,
+                "kind": "table",
+                "text": (
+                    "Table 3-18: The Wizard Special Level. 1st +0 Summon "
+                    "familiar Scribe Scroll 2nd +1 5th +2 Bonus feat 6th +3 "
+                    "10th +5 Bonus feat 11th +5 15th +7 Bonus feat 16th +8 "
+                    "20th +10 Bonus feat."
+                ),
+            },
+            {
+                "source": SOURCE,
+                "page": 23,
+                "kind": "table_data_row",
+                "text": (
+                    "Table columns: Table 3-2: Experience and Level-Dependent "
+                    "Benefits | Character Level | Feats | Increases. Table row: "
+                    "9th +6 +3 +9/+4 | +6/+1 | +4 | 9th 36,000 12 | 6 | 4th | —."
+                ),
+            },
+            {
+                "source": SOURCE,
+                "page": 14,
+                "text": "Humans are adaptable. 1 extra feat at 1st level.",
+            },
+        ],
+    )
+
+    assert answer is not None
+    assert "gets 7 feats" in answer
+    assert "4 character-level feats" in answer
+    assert "2 Wizard bonus feats" in answer
+    assert "1 Human bonus feat" in answer
+    assert "PDF pp. 56, 23, 14" in answer
+
+
 def test_wizard_feat_count_uses_level_and_race_from_question() -> None:
     answer = rag_rules.structured_feat_count_answer(
         "How many feats does a wizard at class level 5 get?",
@@ -256,9 +408,12 @@ def test_feat_count_retrieval_targets_all_three_feat_grants(
         "How many feats does a 1st level human fighter get?"
     )
 
-    assert len(embedded_queries) == 2
+    assert len(embedded_queries) == 4
     assert "Fighter bonus feats at 1st level" in embedded_queries[1]
-    assert "human bonus feat" in embedded_queries[1]
+    assert "feat at 1st level" in embedded_queries[2]
+    assert "every three character levels" in embedded_queries[2]
+    assert "Table 3-2" in embedded_queries[2]
+    assert "human race one extra feat" in embedded_queries[3]
     assert len(passages) == 2
     assert {passage["text"] for passage in passages} == {
         chunk["text"] for chunk in FIGHTER_FEAT_RULE_CHUNKS
@@ -282,11 +437,33 @@ def test_feat_count_retrieval_targets_wizard_progression_and_page_chunks(
         score=1.0,
     )
     query_calls = 0
+    general_point = SimpleNamespace(
+        id="character-feat-rules",
+        payload={
+            **WIZARD_FEAT_RULES[1],
+            "text": (
+                "A character gains a feat at 1st level and another feat every "
+                "three levels thereafter."
+            ),
+        },
+        score=1.0,
+    )
+    human_point = SimpleNamespace(
+        id="human-feat-rules",
+        payload=WIZARD_FEAT_RULES[2],
+        score=1.0,
+    )
 
     def fake_query_points(**_kwargs: object) -> SimpleNamespace:
         nonlocal query_calls
         query_calls += 1
-        return SimpleNamespace(points=[] if query_calls == 1 else [wizard_point])
+        points_by_call = {
+            1: [],
+            2: [wizard_point],
+            3: [general_point],
+            4: [human_point],
+        }
+        return SimpleNamespace(points=points_by_call.get(query_calls, []))
 
     embedded_queries: list[str] = []
     monkeypatch.setattr(
@@ -309,14 +486,107 @@ def test_feat_count_retrieval_targets_wizard_progression_and_page_chunks(
         "How many feats does a 9th level human wizard get?"
     )
 
-    assert len(embedded_queries) == 2
+    assert len(embedded_queries) == 4
     assert "Scribe Scroll" in embedded_queries[1]
     assert "every five levels" in embedded_queries[1]
-    assert len(passages) == 2
-    assert {passage["text"] for passage in passages} == {
+    assert "every three character levels" in embedded_queries[2]
+    assert "human race one extra feat" in embedded_queries[3]
+    assert {passage["text"] for passage in passages} >= {
         wizard_point.payload["text"],
         sibling_point.payload["text"],
+        general_point.payload["text"],
+        human_point.payload["text"],
     }
+
+
+def test_wizard_feat_count_expands_all_class_progression_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    levels = (1, 5, 10, 15, 20)
+    ordinals = {1: "1st", 5: "5th", 10: "10th", 15: "15th", 20: "20th"}
+    wizard_points = [
+        SimpleNamespace(
+            id=f"wizard-level-{level}",
+            payload={
+                "kind": "class_progression_row",
+                "source": SOURCE,
+                "page": 56,
+                "text": (
+                    "Table Table 3–18: The Wizard. Wizard class level "
+                    f"{level}; Original table row: {ordinals[level]} "
+                    f"{'Scribe Scroll' if level == 1 else 'Bonus feat'}."
+                ),
+            },
+            score=1.0,
+        )
+        for level in levels
+    ]
+    general_point = SimpleNamespace(
+        id="character-feat-rules",
+        payload={
+            "kind": "page_text",
+            "source": SOURCE,
+            "page": 88,
+            "text": (
+                "A character gets a feat at 1st level and another feat every "
+                "three levels thereafter."
+            ),
+        },
+        score=1.0,
+    )
+    human_point = SimpleNamespace(
+        id="human-feat-rules",
+        payload={
+            "kind": "page_text",
+            "source": SOURCE,
+            "page": 14,
+            "text": "Humans have 1 extra feat at 1st level.",
+        },
+        score=1.0,
+    )
+    query_calls = 0
+
+    def fake_query_points(**_kwargs: object) -> SimpleNamespace:
+        nonlocal query_calls
+        query_calls += 1
+        results = {
+            1: [],
+            2: [wizard_points[1]],
+            3: [general_point],
+            4: [human_point],
+        }
+        return SimpleNamespace(points=results.get(query_calls, []))
+
+    monkeypatch.setattr(
+        rag_retrieval,
+        "embed",
+        lambda _query: [0.0],
+    )
+    monkeypatch.setattr(
+        rag_retrieval.qdrant,
+        "query_points",
+        fake_query_points,
+    )
+    monkeypatch.setattr(
+        rag_retrieval.qdrant,
+        "scroll",
+        lambda **_kwargs: ([*wizard_points, wizard_points[0]], None),
+    )
+
+    passages = rag_retrieval.retrieve(
+        "How many feats does a 9th level human wizard get?"
+    )
+    answer = rag_rules.structured_feat_count_answer(
+        "How many feats does a 9th level human wizard get?",
+        passages,
+    )
+
+    assert {passage["text"] for passage in passages} >= {
+        point.payload["text"] for point in wizard_points
+    }
+    assert answer is not None
+    assert "gets 7 feats" in answer
+    assert "2 Wizard bonus feats" in answer
 
 
 def test_split_feat_rule_chunks_are_combined_for_counting() -> None:

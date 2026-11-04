@@ -82,60 +82,67 @@ def retrieve(
             points = prioritized_points
 
         if FEAT_COUNT_QUESTION.search(question):
-            feat_count_class = next(
-                (
-                    class_name
-                    for class_name in CORE_CLASSES
-                    if re.search(rf"\b{re.escape(class_name)}\b", question, re.I)
-                ),
-                None,
+            feat_count_classes = [
+                class_name
+                for class_name in CORE_CLASSES
+                if re.search(rf"\b{re.escape(class_name)}\b", question, re.I)
+            ]
+            feat_count_queries = []
+            for feat_count_class in feat_count_classes or ["class"]:
+                if feat_count_class == "Fighter":
+                    class_feat_query = (
+                        "D&D 3.5 Fighter bonus feats at 1st level and every two "
+                        "fighter levels thereafter"
+                    )
+                elif feat_count_class == "Wizard":
+                    class_feat_query = (
+                        "D&D 3.5 Wizard Scribe Scroll bonus feat at 1st level and "
+                        "wizard bonus feats at 5th level and every five levels "
+                        "thereafter"
+                    )
+                else:
+                    class_feat_query = (
+                        f"D&D 3.5 {feat_count_class} bonus feats by class level"
+                    )
+                feat_count_queries.append(class_feat_query)
+            feat_count_queries.append(
+                "D&D 3.5 character gets a feat at 1st level and another feat "
+                "every three character levels; Table 3-2 Experience and "
+                "Level-Dependent Benefits Feats column"
             )
-            if feat_count_class == "Fighter":
-                feat_count_query = (
-                    "D&D 3.5 Fighter bonus feats at 1st level and every two "
-                    "fighter levels thereafter, plus the feat every three "
-                    "character levels and the human bonus feat"
+            if re.search(r"\bhuman\b", question, re.IGNORECASE):
+                feat_count_queries.append(
+                    "D&D 3.5 human race one extra feat at 1st level"
                 )
-            elif feat_count_class == "Wizard":
-                feat_count_query = (
-                    "D&D 3.5 Wizard Scribe Scroll bonus feat at 1st level and "
-                    "wizard bonus feats at 5th level and every five levels "
-                    "thereafter, plus the feat every three character levels "
-                    "and the human bonus feat"
-                )
-            else:
-                feat_class_description = feat_count_class or "class"
-                feat_count_query = (
-                    f"D&D 3.5 {feat_class_description} bonus feats by class "
-                    "level, the feat every three character levels, and the "
-                    "human bonus feat"
-                )
-            feat_count_rules = client.query_points(
-                collection_name=COLLECTION,
-                query=embed_fn(feat_count_query),
-                limit=RETRIEVAL_LIMIT,
-                with_payload=True,
-            )
+
             seen_ids = {point.id for point in points}
-            for point in feat_count_rules.points:
-                if point.id not in seen_ids:
-                    points.append(point)
-                    seen_ids.add(point.id)
+            for feat_count_query in feat_count_queries:
+                feat_count_rules = client.query_points(
+                    collection_name=COLLECTION,
+                    query=embed_fn(feat_count_query),
+                    limit=RETRIEVAL_LIMIT,
+                    with_payload=True,
+                )
+                for point in feat_count_rules.points:
+                    if point.id not in seen_ids:
+                        points.append(point)
+                        seen_ids.add(point.id)
 
             class_rule_pages = {
                 (payload["source"], payload["page"])
                 for point in points
                 if isinstance(payload := (point.payload or {}), dict)
-                and payload.get("kind") == "page_text"
                 and isinstance(payload.get("source"), str)
                 and isinstance(payload.get("page"), int)
-                and feat_count_class is not None
-                and re.search(
-                    rf"\b{re.escape(feat_count_class)}\b.{{0,120}}"
-                    rf"\bbonus feats?\b|\bbonus feats?\b.{{0,120}}"
-                    rf"\b{re.escape(feat_count_class)}\b",
-                    str(payload.get("text", "")),
-                    re.IGNORECASE | re.DOTALL,
+                and any(
+                    re.search(
+                        rf"\b{re.escape(feat_count_class)}\b.{{0,240}}"
+                        rf"\bbonus feats?\b|\bbonus feats?\b.{{0,240}}"
+                        rf"\b{re.escape(feat_count_class)}\b",
+                        str(payload.get("text", "")),
+                        re.IGNORECASE | re.DOTALL,
+                    )
+                    for feat_count_class in feat_count_classes
                 )
             }
             for source, page in class_rule_pages:
@@ -148,10 +155,6 @@ def retrieve(
                         qdrant_models.FieldCondition(
                             key="page",
                             match=qdrant_models.MatchValue(value=page),
-                        ),
-                        qdrant_models.FieldCondition(
-                            key="kind",
-                            match=qdrant_models.MatchValue(value="page_text"),
                         ),
                     ]
                 )

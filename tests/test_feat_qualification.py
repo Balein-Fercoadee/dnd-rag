@@ -201,6 +201,58 @@ def test_class_level_prerequisite_is_deterministically_checked(
     assert "Player's Handbook.pdf, PDF p. 103" in answer
 
 
+def test_weapon_specialization_does_not_match_greater_weapon_specialization() -> None:
+    greater_specialization = {
+        "source": "Player's Handbook.pdf",
+        "page": 96,
+        "kind": "page_text",
+        "text": (
+            "GREATER WEAPON SPECIALIZATION [GENERAL] Choose one type of weapon "
+            "for which you have already selected Weapon Specialization. "
+            "Prerequisites: Proficiency with selected weapon, Greater Weapon "
+            "Focus with selected weapon, Weapon Focus with selected weapon, "
+            "Weapon Specialization with selected weapon, fighter level 12th. "
+            "Benefit: You gain a +2 bonus on damage rolls. "
+        ),
+    }
+    weapon_specialization = (
+        "WEAPON SPECIALIZATION [GENERAL] Choose one type of weapon, for which "
+        "you have already selected the Weapon Focus feat. You deal extra "
+        "damage using this weapon. Prerequisites: Proficiency with selected "
+        "weapon, Weapon Focus with selected weapon, fighter level 4th. "
+        "Benefit: You gain a +2 bonus on damage rolls."
+    )
+    split = weapon_specialization.index("Prerequisites:")
+    overlap_start = split - 70
+    passages = [
+        greater_specialization,
+        {
+            "source": "Player's Handbook.pdf",
+            "page": 103,
+            "kind": "page_text",
+            "text": weapon_specialization[: split + 20],
+        },
+        {
+            "source": "Player's Handbook.pdf",
+            "page": 103,
+            "kind": "page_text",
+            "text": weapon_specialization[overlap_start:],
+        },
+    ]
+
+    answer = rag_rules.feat_class_level_prerequisite_answer(
+        "Can a 4th level fighter take the Weapon Specialization feat?",
+        passages,
+    )
+
+    assert answer is not None
+    assert answer.startswith("Cannot establish whether the character can take")
+    assert "Fighter level 4th" in answer
+    assert "Fighter level 12th" not in answer
+    assert "proficiency with the selected weapon" in answer
+    assert "Weapon Focus feat" in answer
+
+
 def test_class_level_prerequisite_evaluator_is_not_feat_specific() -> None:
     answer = rag_rules.feat_class_level_prerequisite_answer(
         "Can a 5th level wizard take Arcane Mastery at 6th level?",

@@ -34,6 +34,49 @@ CORE_CLASSES = (
 )
 
 
+def _merge_overlapping_page_passages(
+    passages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    passages_by_page: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    other_passages = []
+    for passage in passages:
+        source = passage.get("source")
+        page = passage.get("page")
+        if (
+            passage.get("kind") == "page_text"
+            and isinstance(source, str)
+            and isinstance(page, int)
+            and isinstance(passage.get("text"), str)
+        ):
+            passages_by_page.setdefault((source, page), []).append(passage)
+        else:
+            other_passages.append(passage)
+
+    merged_passages = list(other_passages)
+    for page_passages in passages_by_page.values():
+        chunks = [str(passage["text"]) for passage in page_passages]
+        while True:
+            best_match: tuple[int, int, int] | None = None
+            for left_index, left in enumerate(chunks):
+                for right_index, right in enumerate(chunks):
+                    if left_index == right_index:
+                        continue
+                    max_overlap = min(len(left), len(right), 256)
+                    for overlap in range(max_overlap, 39, -1):
+                        if left.endswith(right[:overlap]):
+                            if best_match is None or overlap > best_match[2]:
+                                best_match = (left_index, right_index, overlap)
+                            break
+            if best_match is None:
+                break
+            left_index, right_index, overlap = best_match
+            chunks[left_index] += chunks[right_index][overlap:]
+            del chunks[right_index]
+
+        merged_passages.extend({**page_passages[0], "text": text} for text in chunks)
+    return merged_passages
+
+
 def feat_class_level_prerequisite_answer(
     question: str, passages: list[dict[str, Any]]
 ) -> str | None:
@@ -61,10 +104,7 @@ def feat_class_level_prerequisite_answer(
         return None
     levels_available = selection_level - character_level
 
-    feat_heading = re.compile(
-        rf"\b{re.escape(feat_name)}\s*\[[A-Z][A-Z ]*\]",
-        re.IGNORECASE,
-    )
+    feat_heading = re.compile(r"(?P<name>[A-Z][A-Z'’ -]*?)\s*\[[A-Z][A-Z ]*\]")
     next_feat_heading = re.compile(r"\b[A-Z][A-Z'’ -]{2,}\s+\[[A-Z ]+\]")
     prerequisite_pattern = re.compile(
         r"\bPrerequisites?\s*:\s*(?P<requirements>.*?)"
@@ -91,11 +131,19 @@ def feat_class_level_prerequisite_answer(
         r"\s+with selected weapon\b"
     )
 
-    for passage in passages:
+    for passage in _merge_overlapping_page_passages(passages):
         text = passage.get("text")
         if not isinstance(text, str):
             continue
-        heading_match = feat_heading.search(text)
+        heading_match = next(
+            (
+                match
+                for match in feat_heading.finditer(text)
+                if re.sub(r"\s+", " ", match.group("name").strip()).casefold()
+                == feat_name.casefold()
+            ),
+            None,
+        )
         if heading_match is None:
             continue
         entry = text[heading_match.end() :]
@@ -191,6 +239,43 @@ def feat_class_level_prerequisite_answer(
                 f"{missing_levels} short of the required {required_class.title()} "
                 f"level {required_level}.{other_requirements_note} "
                 f"{citation(passage)}"
+            )
+
+        missing_requirements = []
+        if (
+            proficiency_requirement_pattern.search(requirements)
+            and re.search(
+                r"\b(?:proficient|proficiency)\b.{0,60}\bweapon\b",
+                question,
+                re.IGNORECASE,
+            )
+            is None
+        ):
+            missing_requirements.append("proficiency with the selected weapon")
+        required_feats = {
+            match.group("name").strip()
+            for match in selected_weapon_feat_pattern.finditer(requirements)
+        }
+        required_feats.update(
+            match.group("name").strip()
+            for match in selected_feat_pattern.finditer(entry)
+        )
+        missing_requirements.extend(
+            f"{name} feat"
+            for name in sorted(required_feats)
+            if re.search(rf"\b{re.escape(name)}\b", question, re.IGNORECASE) is None
+        )
+        if missing_requirements and class_requirements:
+            satisfied_class_requirements = ", ".join(
+                f"{match.group('class').strip().title()} level "
+                f"{match.group('level')}{ordinal_suffix(int(match.group('level')))}"
+                for match in class_requirements
+            )
+            return (
+                f"Cannot establish whether the character can take {feat_name}. "
+                f"The stated class level meets {satisfied_class_requirements}, "
+                f"but the question does not establish "
+                f"{', '.join(missing_requirements)}. {citation(passage)}"
             )
     return None
 

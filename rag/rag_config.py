@@ -133,7 +133,8 @@ FEAT_QUALIFICATION_QUESTION = re.compile(
 FEAT_NAME_IN_QUESTION = re.compile(
     r"\b(?:take|select|choose|gain)\s+(?:the\s+)?"
     r"(?P<name>[\w][\w'’ -]{0,59}?)"
-    r"(?=(?:\s+(?:as\s+a\s+)?feat)?(?:\s+(?:at|when|upon)\b|[?.!,]|$))",
+    r"(?=(?:\s+as\s+a\s+bonus\s+feat|\s+(?:as\s+a\s+)?feat)?"
+    r"(?:\s+(?:at|when|upon)\b|[?.!,]|$))",
     re.IGNORECASE,
 )
 

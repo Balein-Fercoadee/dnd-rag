@@ -80,6 +80,31 @@ def retrieve(
                     prioritized_points.append(point)
                     seen_ids.add(point.id)
             points = prioritized_points
+            if (
+                feat_name is not None
+                and re.search(r"\bas\s+a\s+bonus\s+feat\b", question, re.I)
+                and re.search(r"\bwizard\b", question, re.I)
+            ):
+                bonus_feat_queries = (
+                    "D&D 3.5 Wizard bonus feats choose metamagic feat item "
+                    "creation feat or Spell Mastery",
+                    f"{feat_name} feat type benefit prerequisites D&D 3.5",
+                )
+                for bonus_feat_query in bonus_feat_queries:
+                    bonus_feat_rules = client.query_points(
+                        collection_name=COLLECTION,
+                        query=embed_fn(bonus_feat_query),
+                        limit=(
+                            RETRIEVAL_LIMIT * 4
+                            if bonus_feat_query.startswith(feat_name)
+                            else RETRIEVAL_LIMIT
+                        ),
+                        with_payload=True,
+                    )
+                    for point in bonus_feat_rules.points:
+                        if point.id not in seen_ids:
+                            points.append(point)
+                            seen_ids.add(point.id)
 
         if FEAT_COUNT_QUESTION.search(question):
             feat_count_classes = [

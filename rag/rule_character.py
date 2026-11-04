@@ -77,6 +77,93 @@ def _merge_overlapping_page_passages(
     return merged_passages
 
 
+def _wizard_bonus_feat_answer(
+    feat_name: str,
+    passages: list[dict[str, Any]],
+) -> str | None:
+    wizard_rule_pattern = re.compile(
+        r"\bAt\s+each\s+such\s+opportunity\b.{0,240}\bcan choose\b"
+        r".{0,120}\bmeta-?\s*magic feats?\b.{0,120}\bitem creation feats?\b"
+        r".{0,120}\bSpell Mastery\b",
+        re.IGNORECASE | re.DOTALL,
+    )
+    feat_heading = re.compile(r"(?P<name>[A-Z][A-Z'’ -]*?)\s*\[(?P<type>[A-Z ]+)\]")
+    next_heading = re.compile(r"\b[A-Z][A-Z'’ -]{2,}\s+\[[A-Z ]+\]")
+    merged_passages = _merge_overlapping_page_passages(passages)
+    wizard_passage = next(
+        (
+            passage
+            for passage in merged_passages
+            if isinstance(passage.get("text"), str)
+            and wizard_rule_pattern.search(str(passage["text"]))
+        ),
+        None,
+    )
+    if wizard_passage is None:
+        return None
+
+    for passage in merged_passages:
+        text = passage.get("text")
+        if not isinstance(text, str):
+            continue
+        heading_match = next(
+            (
+                match
+                for match in feat_heading.finditer(text)
+                if re.sub(r"\s+", " ", match.group("name").strip()).casefold()
+                == feat_name.casefold()
+            ),
+            None,
+        )
+        if heading_match is None:
+            continue
+
+        category = re.sub(r"\s+", " ", heading_match.group("type").strip())
+        if category.casefold() in {"metamagic", "item creation"}:
+            return None
+        if feat_name.casefold() == "spell mastery":
+            return None
+        feat_display_name = re.sub(
+            r"\s+",
+            " ",
+            heading_match.group("name").strip().title(),
+        )
+
+        entry = text[heading_match.end() :]
+        next_heading_match = next_heading.search(entry)
+        if next_heading_match is not None:
+            entry = entry[: next_heading_match.start()]
+        benefit_match = re.search(
+            r"\bBenefit\s*:\s*(?P<benefit>.*?)(?=\b(?:Special|Normal)\s*:|$)",
+            entry,
+            re.IGNORECASE | re.DOTALL,
+        )
+        benefit = (
+            re.sub(r"\s+", " ", benefit_match.group("benefit")).strip().rstrip(".")
+            if benefit_match is not None
+            else None
+        )
+        has_prerequisites = re.search(
+            r"\bPrerequisites?\s*:",
+            entry,
+            re.IGNORECASE,
+        )
+        details = []
+        if has_prerequisites is None:
+            details.append("it has no prerequisites")
+        if benefit:
+            details.append(f"its benefit is {benefit}")
+        extra_details = f" ({'; '.join(details)})" if details else ""
+        return (
+            f"No. Wizard bonus feats are limited to metamagic feats, item "
+            f"creation feats, or Spell Mastery. {feat_display_name} is a "
+            f"{category.title()} "
+            f"feat and is not one of those choices{extra_details}. "
+            f"{citation(wizard_passage)} {citation(passage)}"
+        )
+    return None
+
+
 def feat_class_level_prerequisite_answer(
     question: str, passages: list[dict[str, Any]]
 ) -> str | None:
@@ -85,6 +172,12 @@ def feat_class_level_prerequisite_answer(
     feat_name = feat_name_from_question(question)
     if feat_name is None:
         return None
+    if re.search(r"\bwizard\b", question, re.IGNORECASE) and re.search(
+        r"\bas\s+a\s+bonus\s+feat\b", question, re.IGNORECASE
+    ):
+        bonus_feat_answer = _wizard_bonus_feat_answer(feat_name, passages)
+        if bonus_feat_answer is not None:
+            return bonus_feat_answer
 
     character_levels = {
         match.group("class").strip().casefold(): int(match.group("level"))

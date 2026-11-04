@@ -169,6 +169,10 @@ def chat_completions(request: ChatCompletionRequest) -> dict[str, Any]:
             "entries. For example, 'Clr 5, Drd 4, Sun 5, War 5' lists Cleric and "
             "Druid classes plus the Sun and War domains; Sun and War are not "
             "classes. Do not expand them into Sun Soul or Warlock."
+            "Answer the specific question directly. Include only details needed "
+            "to support the answer; do not add unrelated examples or claims. If "
+            "the passages don't establish something, say what's missing instead "
+            "of guessing."
         )
         ability_match = ABILITY_SCORE_PATTERN.search(question)
         class_rows = [

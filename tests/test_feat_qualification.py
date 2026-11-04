@@ -88,6 +88,115 @@ def test_feat_name_is_extracted_from_selection_questions(
     assert rag_rules.feat_name_from_question(question) == expected
 
 
+def test_feat_name_extraction_stops_before_bonus_feat_qualifier() -> None:
+    assert (
+        rag_rules.feat_name_from_question(
+            "Can a wizard take toughness as a bonus feat?"
+        )
+        == "toughness"
+    )
+
+
+def test_wizard_cannot_select_general_feat_as_bonus_feat(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    passages = [
+        {
+            "source": "Player's Handbook.pdf",
+            "page": 58,
+            "kind": "page_text",
+            "text": (
+                "At each\nsuch opportunity, she can choose a metamagic feat, "
+                "an item creation feat, or Spell Mastery."
+            ),
+        },
+        {
+            "source": "Player's Handbook.pdf",
+            "page": 102,
+            "kind": "page_text",
+            "text": (
+                "TOUGHNESS [GENERAL] You are tougher than normal. "
+                "Benefit:You gain +3 hit points. "
+                "Special:A character may gain this feat multiple times. Its "
+                "effects stack."
+            ),
+        },
+    ]
+    monkeypatch.setattr(rag_app, "retrieve", lambda _question: passages)
+    monkeypatch.setattr(
+        rag_app.requests,
+        "post",
+        lambda *_args, **_kwargs: pytest.fail(
+            "The explicit Wizard bonus-feat rule should be evaluated deterministically"
+        ),
+    )
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen3:8b",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Can a wizard take toughness as a bonus feat?",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    answer = response.json()["choices"][0]["message"]["content"]
+    assert answer.startswith("No.")
+    assert "Wizard bonus feats are limited to metamagic feats" in answer
+    assert "Toughness is a General feat" in answer
+    assert "it has no prerequisites" in answer
+    assert "its benefit is You gain +3 hit points" in answer
+    assert "+4 bonus on Constitution-based checks" not in answer
+    assert "PDF p. 58" in answer
+    assert "PDF p. 102" in answer
+
+
+def test_wizard_bonus_feat_retrieval_targets_class_rules_and_feat_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = feat_point("initial", "Wizard bonus feat Toughness")
+    feat_rule = feat_point(
+        "feat",
+        "TOUGHNESS [GENERAL] Benefit:You gain +3 hit points.",
+    )
+    wizard_rule = feat_point(
+        "wizard",
+        (
+            "At each such opportunity, she can choose a metamagic feat, "
+            "an item creation feat, or Spell Mastery."
+        ),
+    )
+    embedded_queries: list[str] = []
+    query_results = iter(([initial], [initial], [wizard_rule], [feat_rule]))
+
+    monkeypatch.setattr(
+        rag_retrieval,
+        "embed",
+        lambda query: embedded_queries.append(query) or [len(embedded_queries)],
+    )
+    monkeypatch.setattr(
+        rag_retrieval.qdrant,
+        "query_points",
+        lambda **_kwargs: SimpleNamespace(points=next(query_results)),
+    )
+
+    passages = rag_retrieval.retrieve("Can a wizard take toughness as a bonus feat?")
+
+    assert len(embedded_queries) == 4
+    assert "toughness feat prerequisites" in embedded_queries[1]
+    assert "Wizard bonus feats choose metamagic" in embedded_queries[2]
+    assert "toughness feat type benefit prerequisites" in embedded_queries[3]
+    assert {passage["text"] for passage in passages} >= {
+        wizard_rule.payload["text"],
+        feat_rule.payload["text"],
+    }
+
+
 def test_feat_qualification_prompt_compares_prerequisites_with_character(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
